@@ -109,6 +109,10 @@ import {
 } from "@/server/mcp/tools/site-audit-cleanup-tools";
 import { whoamiTool } from "@/server/mcp/tools/whoami";
 import { explorePromptTool } from "@/server/mcp/tools/explore-prompt";
+import {
+  ingestSerpSnapshotsTool,
+  listSerpSnapshotsTool,
+} from "@/server/mcp/tools/serp-snapshot-tools";
 
 type ToolSchema = z.ZodType | z.ZodRawShape;
 
@@ -217,6 +221,8 @@ export function createOpenSeoMcpServer(authProps: McpProps) {
   register(getBacklinksProfileTool);
   register(getSerpResultsTool);
   register(searchSerpLocationsTool);
+  register(ingestSerpSnapshotsTool);
+  register(listSerpSnapshotsTool);
   register(getAiVisibilityTrackerTool);
   register(explorePromptTool);
   register(generateAiVisibilityPromptsTool);

@@ -3,6 +3,7 @@ import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 import { AppError } from "@/server/lib/errors";
 import { validateTeamDomain } from "@/shared/selfhost-checks";
 import { classifyAccessVerificationError } from "./accessTokenErrors";
+import { ensureSharedWorkspaceOrganization } from "@/server/auth/delegated-organization";
 import { resolveSharedWorkspaceContext } from "./delegated";
 import type { EnsuredUserContext } from "./types";
 
@@ -36,9 +37,7 @@ function getValidatedTeamDomain(teamDomain: string) {
   return result.origin;
 }
 
-export async function resolveCloudflareAccessContext(
-  headers: Headers,
-): Promise<EnsuredUserContext> {
+async function verifyAccessToken(headers: Headers): Promise<JWTPayload> {
   const teamDomain = env.TEAM_DOMAIN
     ? getValidatedTeamDomain(env.TEAM_DOMAIN)
     : null;
@@ -87,6 +86,12 @@ export async function resolveCloudflareAccessContext(
     throw classifyAccessVerificationError(error);
   }
 
+  return payload;
+}
+
+async function resolveAccessUser(
+  payload: JWTPayload,
+): Promise<EnsuredUserContext> {
   const userId = typeof payload.sub === "string" ? payload.sub : null;
   const userEmail = typeof payload.email === "string" ? payload.email : null;
 
@@ -95,4 +100,29 @@ export async function resolveCloudflareAccessContext(
   }
 
   return resolveSharedWorkspaceContext(userId, userEmail);
+}
+
+export async function resolveCloudflareAccessContext(
+  headers: Headers,
+): Promise<EnsuredUserContext> {
+  return resolveAccessUser(await verifyAccessToken(headers));
+}
+
+// For machine callers of raw API routes (e.g. a collector pushing data): an
+// Access service token's JWT carries `common_name` (the token's client ID) and
+// no user identity. Such a caller has no user row, so it gets the shared
+// workspace's organization only — enough for project-scoped writes. Every
+// other request resolves exactly as resolveCloudflareAccessContext does.
+export async function resolveCloudflareAccessOrganizationId(
+  headers: Headers,
+): Promise<string> {
+  const payload = await verifyAccessToken(headers);
+  const isServiceToken =
+    !payload.sub &&
+    typeof payload.common_name === "string" &&
+    payload.common_name.length > 0;
+  if (isServiceToken) {
+    return ensureSharedWorkspaceOrganization();
+  }
+  return (await resolveAccessUser(payload)).organizationId;
 }
