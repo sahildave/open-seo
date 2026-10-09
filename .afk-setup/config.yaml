@@ -1,0 +1,101 @@
+# How this stack is verified. Human-edited, committed, read-only to the runner.
+# Seeded from the runner's template (afk-claude/.afk-setup/config.yaml).
+# Everything commented out below is optional — uncomment a line to use it.
+
+# The per-lane gate: every lane runs this before its work can integrate. Keep it
+# to commands that are cheap and that touch nothing shared on the host. Lanes run
+# in parallel, so a command here that reaches ONE thing on the machine — a local
+# database, a fixed port, a simulator, a derived-data path, a lock directory —
+# makes every other lane queue behind it, and the queue reads as a slow or flaky
+# gate rather than as contention. Two ways out: key the resource per lane, naming
+# it from `$PWD`, or move the command down to `baselineChecks`.
+#
+# Neither command below touches a host singleton: ci:check is prettier, knip,
+# tsc, oxlint and the plugin-skill sync (all in-tree); test:ci is vitest with
+# mocks, no database, no port, no network. ~30s and ~10s on an M5 Pro.
+defaultChecks:
+  - pnpm run ci:check
+  - pnpm run test:ci
+
+# Read by THREE gates, and self-sufficient in all of them: the branch-cut
+# baseline and the closeout fix gate both run `baselineChecks ?? defaultChecks`
+# ALONE, and every task's integration runs `task.checks u baselineChecks` — where
+# a task that narrows its own `checks:` does NOT also get `defaultChecks`. So
+# write the full list the repo needs verified, lane commands included.
+#
+# `pnpm run build` is left out on purpose: the SSR vite build needs a 4 GiB
+# heap and a Cloudflare-flavoured environment, and ci:check already runs tsc.
+baselineChecks:
+  - pnpm run ci:check
+  - pnpm run test:ci
+
+worktreeSetup:
+  link: []
+  copy: []
+  # A fresh worktree (and a Claude Code cloud sandbox) has no node_modules.
+  # pnpm's content-addressed store makes this cheap after the first install.
+  run: ["pnpm install --frozen-lockfile --prefer-offline"]
+  # teardown: []
+  # finish:   []
+
+maxParallel: 4
+
+# Whether the product has users yet. This is a fork used privately by Sahil.
+launchStatus: pre-launch
+
+# Paths whose change is not undone by a revert after it has run. A task naming
+# one needs `gate: before` or a waiver on the epic, and the merge verb refuses a
+# PR that touches one: a schema migration applied to D1/Postgres stays applied.
+oneWayDoors:
+  migrations: [drizzle/sqlite/**, drizzle/pg/**]
+
+# protectedEdits:
+#   package.json: [scripts]
+# testScripts: ["scripts/test-*"]
+# sweepRunArtefacts: true
+
+agent:
+  timeoutMs: 5400000
+  # model: claude-opus-5-5
+  # reasoningEffort: medium
+  # maxBuilderRetries: 1
+
+# Skills each role gets. `always` is a rule the agent must apply; `offer` is a
+# choice it applies only when the task needs it. `notes` is prose for a stack
+# with no skill at all. Proposed by `afk stack detect`, notes hand-written.
+roles:
+  # --- architect: plans, before any code --------------------------------------
+  plan-reviewer:
+    offer: ["pstack:principle-separate-before-serializing-shared-state"]
+
+  # --- builders: write code ---------------------------------------------------
+  implementer:
+    always: [coduo-implement, karpathy-guidelines]
+    offer:
+      [
+        "pstack:typescript-best-practices",
+        "pstack:principle-make-operations-idempotent",
+        tdd,
+      ]
+    notes: "TanStack Start on Cloudflare Workers, pnpm only (never npm). Schema changes go in both dialects (src/db + drizzle/sqlite and drizzle/pg via pnpm db:generate) and stay compatible with SQLite and Postgres. PostHog event names keep the existing convention. Lanes may run in a cloud sandbox: no live Google, no browser, no Cloudflare deploy, no secrets, no launchd; test parsers against committed fixtures, never the network. Read AGENTS.md before writing tests."
+  integrator:
+    offer:
+      [
+        resolving-merge-conflicts,
+        "pstack:blast-radius",
+        "pstack:principle-prove-it-works",
+      ]
+
+  # --- reviewers: gate the epic -----------------------------------------------
+  verifier:
+    offer:
+      - diagnosing-bugs
+      - "pstack:blast-radius"
+      - "pstack:principle-prove-it-works"
+      - "pstack:show-me-your-work"
+      - "react-doctor:react-doctor"
+  fixer:
+    always: [karpathy-guidelines]
+    offer: [diagnosing-bugs]
+  reflector:
+    notes: "Write the reflection and nothing else. Do not update memory files, CLAUDE.md, or any knowledge base; the operator reads the document and decides what to keep."

@@ -17,3 +17,6 @@ drizzle/pg/
 planning/
 src/worker-configuration.d.ts
 web/
+# AFK runner output: run artefacts and the generated progress page
+.afk-runs/
+docs/progress.md

@@ -56,3 +56,15 @@ Do not mine an entire session for papercuts or start a broad cleanup unless the 
 Reviewer context lives in `docs/maintainers/review-guidelines.md`: the hard invariants (tenant scoping, dual-dialect persistence, billing seams, SSRF handling) and the false-positive controls that keep reviewers from flagging intentional behavior. After a merge-ready or other code review verifies a finding, add to that file only when the finding exposes a recurring or high-risk repository invariant that existing context and automated checks do not capture. Do not promote one-off bugs or preferences into permanent review rules.
 
 Changes to `AGENTS.md`, `.claude/CLAUDE.md`, `.agents/skills/**`, `.github/**`, and `docs/maintainers/review-guidelines.md` alter the review control plane and must receive explicit maintainer review. CODEOWNERS requests that review; where repository settings allow, enable GitHub's requirement for code-owner approval.
+
+## Unattended runs (AFK)
+
+Epics are specified in this fork's GitHub Issues (`sahildave/open-seo`): one epic with a fenced `afk:` block and one child issue per task. `.afk-setup/config.yaml` holds the checks every lane runs (`pnpm run ci:check`, `pnpm run test:ci`), the worktree setup (`pnpm install`) and the skill bindings per role. `.afk/` is gitignored machine state.
+
+Builder tickets may run in a Claude Code cloud sandbox, so a builder ticket must be completable there:
+
+- Allowed: `pnpm install`, the checks above, unit tests against committed fixtures (for example `fixtures/google-serp/`).
+- Not available: a live browser, live Google, launchd, Cloudflare deploys (`pnpm deploy:*`), secrets or `.env.*` files, Search Console consent.
+- Work that needs any of those is a `ready-for-human` ticket or a `gate`, never a builder lane.
+- Schema migrations under `drizzle/` are one-way doors: their ticket is `gate: before`.
+- Builders do not commit; the runner owns git history.

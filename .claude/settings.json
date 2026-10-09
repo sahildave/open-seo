@@ -1,0 +1,19 @@
+{
+  "extraKnownMarketplaces": {
+    "coduo-agents": {
+      "source": {
+        "source": "github",
+        "repo": "sahildave/coduo-agents-marketplace"
+      },
+      "autoUpdate": true
+    }
+  },
+  "enabledPlugins": {
+    "vercel-react@coduo-agents": true,
+    "react-doctor@coduo-agents": true,
+    "vitest@coduo-agents": true,
+    "pstack@coduo-agents": true,
+    "cloudflare@claude-plugins-official": true,
+    "posthog@claude-plugins-official": true
+  }
+}
