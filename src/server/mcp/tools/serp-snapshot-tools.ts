@@ -8,6 +8,7 @@ import { projectIdSchema } from "@/server/mcp/schemas";
 import {
   MAX_SNAPSHOTS_PER_INGEST,
   serpSnapshotInputSchema,
+  serpVideoTranscriptInputSchema,
 } from "@/types/schemas/serpSnapshots";
 
 const ingestInputSchema = {
@@ -18,6 +19,14 @@ const ingestInputSchema = {
     .max(MAX_SNAPSHOTS_PER_INGEST)
     .describe(
       `Up to ${MAX_SNAPSHOTS_PER_INGEST} SERP captures, one per keyword per collection.`,
+    ),
+  transcripts: z
+    .array(serpVideoTranscriptInputSchema)
+    .max(100)
+    .optional()
+    .default([])
+    .describe(
+      "Optional YouTube transcripts shared by snapshots in this batch.",
     ),
 } as const;
 
@@ -51,6 +60,7 @@ export const ingestSerpSnapshotsTool = {
       const inserted = await SerpSnapshotService.ingest(
         context.project,
         args.snapshots,
+        args.transcripts,
       );
       return mcpResponse({
         text:
@@ -90,6 +100,10 @@ const listInputSchema = {
     .describe(
       "Compare each snapshot with the previous capture of the same keyword, device and market: URLs that entered or left, position changes, new PAA questions.",
     ),
+  includeTranscripts: z
+    .boolean()
+    .optional()
+    .describe("Attach stored YouTube transcripts to matching video results."),
 } as const;
 
 export const listSerpSnapshotsTool = {
@@ -116,6 +130,7 @@ export const listSerpSnapshotsTool = {
         keyword: args.keyword,
         limit: args.limit ?? 10,
         diff: args.diff ?? false,
+        includeTranscripts: args.includeTranscripts ?? false,
       });
       const text =
         results.length === 0

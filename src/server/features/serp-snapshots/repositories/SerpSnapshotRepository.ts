@@ -1,10 +1,14 @@
-import { and, desc, eq, lt } from "drizzle-orm";
+import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { runBatch } from "@/db/runBatch";
-import { serpSnapshots } from "@/db/schema";
+import { serpSnapshots, serpVideoTranscripts } from "@/db/schema";
 
 export type SerpSnapshotRow = typeof serpSnapshots.$inferSelect;
 type NewSerpSnapshotRow = typeof serpSnapshots.$inferInsert;
+type NewSerpVideoTranscriptRow = typeof serpVideoTranscripts.$inferInsert;
+
+export type SerpVideoTranscriptRow = typeof serpVideoTranscripts.$inferSelect;
+const TRANSCRIPT_QUERY_CHUNK_SIZE = 80;
 
 // One row per statement: a row binds 15 parameters and D1 caps a statement at
 // ~100, so multi-row inserts would need chunking for no real gain at <=50 rows.
@@ -12,6 +16,46 @@ async function insertMany(rows: NewSerpSnapshotRow[]) {
   await runBatch((tx) =>
     rows.map((row) => tx.insert(serpSnapshots).values(row)),
   );
+}
+
+async function insertTranscripts(rows: NewSerpVideoTranscriptRow[]) {
+  if (rows.length === 0) return;
+  await runBatch((tx) =>
+    rows.map((row) =>
+      tx.insert(serpVideoTranscripts).values(row).onConflictDoNothing(),
+    ),
+  );
+}
+
+async function listTranscripts(projectId: string, videoIds: string[]) {
+  if (videoIds.length === 0) return new Map<string, SerpVideoTranscriptRow>();
+
+  const uniqueVideoIds = [...new Set(videoIds)];
+  const rows: SerpVideoTranscriptRow[] = [];
+  for (
+    let offset = 0;
+    offset < uniqueVideoIds.length;
+    offset += TRANSCRIPT_QUERY_CHUNK_SIZE
+  ) {
+    rows.push(
+      ...(await db
+        .select()
+        .from(serpVideoTranscripts)
+        .where(
+          and(
+            eq(serpVideoTranscripts.projectId, projectId),
+            inArray(
+              serpVideoTranscripts.videoId,
+              uniqueVideoIds.slice(
+                offset,
+                offset + TRANSCRIPT_QUERY_CHUNK_SIZE,
+              ),
+            ),
+          ),
+        )),
+    );
+  }
+  return new Map(rows.map((row) => [row.videoId, row]));
 }
 
 async function listLatest(params: {
@@ -57,6 +101,8 @@ async function getPrevious(row: SerpSnapshotRow) {
 
 export const SerpSnapshotRepository = {
   insertMany,
+  insertTranscripts,
+  listTranscripts,
   listLatest,
   getPrevious,
 };

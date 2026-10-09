@@ -1,7 +1,11 @@
 import { safeHostname } from "@/shared/safe-url";
-import type { SerpSnapshotInput } from "@/types/schemas/serpSnapshots";
+import type {
+  SerpSnapshotInput,
+  SerpVideoTranscriptInput,
+} from "@/types/schemas/serpSnapshots";
 import {
   SerpSnapshotRepository,
+  type SerpVideoTranscriptRow,
   type SerpSnapshotRow,
 } from "../repositories/SerpSnapshotRepository";
 
@@ -13,6 +17,13 @@ type SnapshotProject = {
 };
 
 type OrganicResult = SerpSnapshotInput["organic"][number];
+type SnapshotVideo = SerpSnapshotInput["videos"][number];
+type AttachedTranscript = {
+  videoId: string;
+  text: string;
+  language: string | null;
+  fetchedAt: string;
+};
 
 function bareHost(value: string) {
   const withProtocol = /^[a-z][a-z\d+.-]*:\/\//i.test(value)
@@ -38,6 +49,7 @@ function findOurPosition(domain: string | null, organic: OrganicResult[]) {
 async function ingest(
   project: SnapshotProject,
   snapshots: SerpSnapshotInput[],
+  transcripts: SerpVideoTranscriptInput[] = [],
 ) {
   const rows = snapshots.map((snapshot) => ({
     id: crypto.randomUUID(),
@@ -57,6 +69,16 @@ async function ingest(
     ourPosition: findOurPosition(project.domain, snapshot.organic),
   }));
   await SerpSnapshotRepository.insertMany(rows);
+  await SerpSnapshotRepository.insertTranscripts(
+    transcripts.map((transcript) => ({
+      id: crypto.randomUUID(),
+      projectId: project.id,
+      videoId: transcript.videoId,
+      transcript: transcript.text,
+      language: transcript.language ?? null,
+      fetchedAt: new Date(transcript.fetchedAt).toISOString(),
+    })),
+  );
   return rows.map((row) => ({
     id: row.id,
     keyword: row.keyword,
@@ -89,7 +111,48 @@ function parseRow(row: SerpSnapshotRow) {
   };
 }
 
-export type SerpSnapshot = ReturnType<typeof parseRow>;
+export type SerpSnapshot = Omit<ReturnType<typeof parseRow>, "videos"> & {
+  videos: Array<SnapshotVideo & { transcript?: AttachedTranscript }>;
+};
+
+function videoIdFromUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+    if (hostname === "youtu.be") {
+      return parsed.pathname.slice(1).split("/")[0] || null;
+    }
+    if (!/(^|\.)youtube\.com$/.test(hostname)) return null;
+    if (parsed.pathname === "/watch") return parsed.searchParams.get("v");
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    return parts[0] === "shorts" || parts[0] === "embed"
+      ? (parts[1] ?? null)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function attachTranscripts(
+  snapshot: ReturnType<typeof parseRow>,
+  transcripts: Map<string, SerpVideoTranscriptRow>,
+): SerpSnapshot {
+  return {
+    ...snapshot,
+    videos: snapshot.videos.map((video) => {
+      const videoId = videoIdFromUrl(video.url);
+      const transcript = videoId ? transcripts.get(videoId) : undefined;
+      if (!transcript) return video;
+      const attached: AttachedTranscript = {
+        videoId: transcript.videoId,
+        text: transcript.transcript,
+        language: transcript.language,
+        fetchedAt: transcript.fetchedAt,
+      };
+      return { ...video, transcript: attached };
+    }),
+  };
+}
 
 // Compare URLs without the noise Google adds between captures.
 function urlKey(url: string) {
@@ -137,11 +200,27 @@ async function list(params: {
   keyword?: string;
   limit: number;
   diff: boolean;
+  includeTranscripts?: boolean;
 }) {
   const rows = await SerpSnapshotRepository.listLatest(params);
+  const parsedRows = rows.map((row) => ({ row, snapshot: parseRow(row) }));
+  const transcriptMap = params.includeTranscripts
+    ? await SerpSnapshotRepository.listTranscripts(
+        params.projectId,
+        parsedRows.flatMap(({ snapshot }) =>
+          snapshot.videos.flatMap((video) => {
+            const videoId = videoIdFromUrl(video.url);
+            return videoId ? [videoId] : [];
+          }),
+        ),
+      )
+    : new Map<string, SerpVideoTranscriptRow>();
+
   return Promise.all(
-    rows.map(async (row) => {
-      const snapshot = parseRow(row);
+    parsedRows.map(async ({ row, snapshot: parsedSnapshot }) => {
+      const snapshot = params.includeTranscripts
+        ? attachTranscripts(parsedSnapshot, transcriptMap)
+        : parsedSnapshot;
       if (!params.diff) return { snapshot, diff: undefined };
       const previous = await SerpSnapshotRepository.getPrevious(row);
       return {

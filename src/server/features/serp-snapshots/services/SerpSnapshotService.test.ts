@@ -1,5 +1,11 @@
 import { readFileSync } from "node:fs";
-import { createClient, type Client } from "@libsql/client";
+import {
+  createClient,
+  type Client,
+  type InArgs,
+  type InStatement,
+  type ResultSet,
+} from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import {
   afterAll,
@@ -25,7 +31,33 @@ let SerpSnapshotService: typeof ServiceModule.SerpSnapshotService;
 
 beforeAll(async () => {
   client = createClient({ url: "file::memory:" });
-  const testDb = drizzle(client);
+  function guardedExecute(statement: InStatement): Promise<ResultSet>;
+  function guardedExecute(sql: string, args?: InArgs): Promise<ResultSet>;
+  function guardedExecute(statement: InStatement, args?: InArgs) {
+    const statementArgs = typeof statement === "string" ? args : statement.args;
+    const parameterCount = Array.isArray(statementArgs)
+      ? statementArgs.length
+      : Object.keys(statementArgs ?? {}).length;
+    if (parameterCount > 100) {
+      throw new Error("D1 bound-parameter limit exceeded");
+    }
+    return typeof statement === "string"
+      ? client.execute(statement, args)
+      : client.execute(statement);
+  }
+  const guardedClient: Client = {
+    execute: guardedExecute,
+    batch: (statements, mode) => client.batch(statements, mode),
+    migrate: (statements) => client.migrate(statements),
+    transaction: () => client.transaction(),
+    executeMultiple: (sql) => client.executeMultiple(sql),
+    sync: () => client.sync(),
+    close: () => client.close(),
+    reconnect: () => client.reconnect(),
+    closed: client.closed,
+    protocol: client.protocol,
+  };
+  const testDb = drizzle(guardedClient);
   vi.doMock("@/db", () => ({ db: testDb }));
   vi.doMock("@/db/runBatch", () => ({
     runBatch: async (build: (tx: unknown) => Promise<unknown>[]) => {
@@ -39,6 +71,9 @@ beforeAll(async () => {
       ...readFileSync("drizzle/sqlite/0055_serp_snapshots.sql", "utf8").split(
         "--> statement-breakpoint",
       ),
+      ...readFileSync("drizzle/sqlite/0056_first_magma.sql", "utf8").split(
+        "--> statement-breakpoint",
+      ),
     ].join("\n"),
   );
   ({ SerpSnapshotService } = await import("./SerpSnapshotService"));
@@ -50,6 +85,7 @@ afterAll(() => {
 
 beforeEach(async () => {
   await client.execute("DELETE FROM serp_snapshots");
+  await client.execute("DELETE FROM serp_video_transcripts");
 });
 
 const project = {
@@ -91,6 +127,98 @@ describe("ingest", () => {
     ]);
     expect(ranked?.ourPosition).toBe(2);
     expect(absent?.ourPosition).toBeNull();
+  });
+
+  it("stores one transcript per project/video and attaches it only when requested", async () => {
+    const video = {
+      title: "A video",
+      url: "https://www.youtube.com/watch?v=video_1",
+      position: 1,
+    };
+    const transcript = {
+      videoId: "video_1",
+      text: "The first transcript",
+      language: "en",
+      fetchedAt: "2026-10-01T10:00:00.000Z",
+    };
+
+    await SerpSnapshotService.ingest(
+      project,
+      [snapshot({ keyword: "first", videos: [video] })],
+      [transcript],
+    );
+    await SerpSnapshotService.ingest(
+      project,
+      [snapshot({ keyword: "second", videos: [video] })],
+      [{ ...transcript, text: "The retry transcript" }],
+    );
+
+    const stored = await client.execute(
+      "SELECT video_id, transcript FROM serp_video_transcripts WHERE project_id = 'proj_1'",
+    );
+    expect(stored.rows).toEqual([
+      { video_id: "video_1", transcript: "The first transcript" },
+    ]);
+
+    const withoutTranscripts = await SerpSnapshotService.list({
+      projectId: "proj_1",
+      limit: 10,
+      diff: false,
+    });
+    expect(withoutTranscripts[0]?.snapshot.videos[0]).not.toHaveProperty(
+      "transcript",
+    );
+
+    const withTranscripts = await SerpSnapshotService.list({
+      projectId: "proj_1",
+      limit: 10,
+      diff: false,
+      includeTranscripts: true,
+    });
+    expect(withTranscripts[0]?.snapshot.videos[0]).toMatchObject({
+      transcript: {
+        videoId: "video_1",
+        text: "The first transcript",
+        language: "en",
+        fetchedAt: "2026-10-01T10:00:00.000Z",
+      },
+    });
+  });
+
+  it("attaches transcripts without exceeding D1's bound-parameter limit", async () => {
+    const videos = Array.from({ length: 101 }, (_, index) => ({
+      title: `Video ${index}`,
+      url: `https://www.youtube.com/watch?v=video_${index}`,
+      position: index + 1,
+    }));
+    const transcripts = videos.map((_, index) => ({
+      videoId: `video_${index}`,
+      text: `Transcript ${index}`,
+      fetchedAt: "2026-10-01T10:00:00.000Z",
+    }));
+
+    await SerpSnapshotService.ingest(
+      project,
+      [
+        snapshot({ keyword: "first", videos: videos.slice(0, 50) }),
+        snapshot({ keyword: "second", videos: videos.slice(50, 100) }),
+        snapshot({ keyword: "third", videos: videos.slice(100) }),
+      ],
+      transcripts,
+    );
+
+    const results = await SerpSnapshotService.list({
+      projectId: "proj_1",
+      limit: 3,
+      diff: false,
+      includeTranscripts: true,
+    });
+
+    const attachedVideos = results.flatMap((result) => result.snapshot.videos);
+    expect(attachedVideos).toHaveLength(101);
+    expect(JSON.stringify(attachedVideos)).toContain(
+      '"videoId":"video_100","text":"Transcript 100"',
+    );
   });
 });
 

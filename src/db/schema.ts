@@ -133,4 +133,5 @@ export const {
   aiSources,
   aiMatches,
   serpSnapshots,
+  serpVideoTranscripts,
 } = schema;

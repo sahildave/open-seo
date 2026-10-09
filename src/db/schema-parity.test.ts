@@ -190,6 +190,11 @@ describe("schema parity: application tables", () => {
     );
   });
 
+  it("includes the project-scoped video transcript table on both backends", () => {
+    expect(sqliteAppTables.has("serp_video_transcripts")).toBe(true);
+    expect(pgAppTables.has("serp_video_transcripts")).toBe(true);
+  });
+
   for (const [name, sqliteTable] of sqliteAppTables) {
     const pgTable = pgAppTables.get(name);
     if (!pgTable) continue; // reported by the table-set assertion above
