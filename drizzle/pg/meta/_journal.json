@@ -239,6 +239,13 @@
       "when": 1791535208263,
       "tag": "0033_serp_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1791549911366,
+      "tag": "0034_boring_prima",
+      "breakpoints": true
     }
   ]
 }

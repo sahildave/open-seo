@@ -1,4 +1,10 @@
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import { projects } from "./app.schema";
 
@@ -37,6 +43,32 @@ export const serpSnapshots = sqliteTable(
       table.projectId,
       table.keyword,
       table.collectedAt,
+    ),
+  ],
+);
+
+// One transcript is shared by every snapshot that contains the same YouTube
+// video for a project. The collector may retry a batch, so the project/video
+// key is the idempotency boundary for transcript inserts.
+export const serpVideoTranscripts = sqliteTable(
+  "serp_video_transcripts",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    videoId: text("video_id").notNull(),
+    transcript: text("transcript").notNull(),
+    language: text("language"),
+    fetchedAt: text("fetched_at").notNull(),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
+  },
+  (table) => [
+    uniqueIndex("serp_video_transcripts_project_video_idx").on(
+      table.projectId,
+      table.videoId,
     ),
   ],
 );

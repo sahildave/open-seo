@@ -39,6 +39,9 @@ beforeAll(async () => {
       ...readFileSync("drizzle/sqlite/0055_serp_snapshots.sql", "utf8").split(
         "--> statement-breakpoint",
       ),
+      ...readFileSync("drizzle/sqlite/0056_first_magma.sql", "utf8").split(
+        "--> statement-breakpoint",
+      ),
     ].join("\n"),
   );
   ({ SerpSnapshotService } = await import("./SerpSnapshotService"));
@@ -50,6 +53,7 @@ afterAll(() => {
 
 beforeEach(async () => {
   await client.execute("DELETE FROM serp_snapshots");
+  await client.execute("DELETE FROM serp_video_transcripts");
 });
 
 const project = {
@@ -91,6 +95,62 @@ describe("ingest", () => {
     ]);
     expect(ranked?.ourPosition).toBe(2);
     expect(absent?.ourPosition).toBeNull();
+  });
+
+  it("stores one transcript per project/video and attaches it only when requested", async () => {
+    const video = {
+      title: "A video",
+      url: "https://www.youtube.com/watch?v=video_1",
+      position: 1,
+    };
+    const transcript = {
+      videoId: "video_1",
+      text: "The first transcript",
+      language: "en",
+      fetchedAt: "2026-10-01T10:00:00.000Z",
+    };
+
+    await SerpSnapshotService.ingest(
+      project,
+      [snapshot({ keyword: "first", videos: [video] })],
+      [transcript],
+    );
+    await SerpSnapshotService.ingest(
+      project,
+      [snapshot({ keyword: "second", videos: [video] })],
+      [{ ...transcript, text: "The retry transcript" }],
+    );
+
+    const stored = await client.execute(
+      "SELECT video_id, transcript FROM serp_video_transcripts WHERE project_id = 'proj_1'",
+    );
+    expect(stored.rows).toEqual([
+      { video_id: "video_1", transcript: "The first transcript" },
+    ]);
+
+    const withoutTranscripts = await SerpSnapshotService.list({
+      projectId: "proj_1",
+      limit: 10,
+      diff: false,
+    });
+    expect(withoutTranscripts[0]?.snapshot.videos[0]).not.toHaveProperty(
+      "transcript",
+    );
+
+    const withTranscripts = await SerpSnapshotService.list({
+      projectId: "proj_1",
+      limit: 10,
+      diff: false,
+      includeTranscripts: true,
+    });
+    expect(withTranscripts[0]?.snapshot.videos[0]).toMatchObject({
+      transcript: {
+        videoId: "video_1",
+        text: "The first transcript",
+        language: "en",
+        fetchedAt: "2026-10-01T10:00:00.000Z",
+      },
+    });
   });
 });
 

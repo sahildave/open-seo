@@ -49,6 +49,7 @@ async function handleSerpSnapshotIngest(request: Request): Promise<Response> {
   const inserted = await SerpSnapshotService.ingest(
     project,
     body.data.snapshots,
+    body.data.transcripts,
   );
   return Response.json({ inserted }, { status: 201 });
 }

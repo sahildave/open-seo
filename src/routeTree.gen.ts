@@ -41,6 +41,7 @@ import { Route as AppSettingsOrganizationRouteImport } from './routes/_app/setti
 import { Route as AuthenticatedOnboardingIndexRouteImport } from './routes/_authenticated.onboarding.index'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiAutumnSplatRouteImport } from './routes/api/autumn/$'
+import { Route as ApiRankingLadderQueriesRouteImport } from './routes/api/ranking-ladder/queries'
 import { Route as STokenIndexRouteImport } from './routes/s/$token/index'
 import { Route as STokenOgDotpngRouteImport } from './routes/s/$token/og[.]png'
 import { Route as STokenRawRouteImport } from './routes/s/$token/raw'
@@ -231,6 +232,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
 const ApiAutumnSplatRoute = ApiAutumnSplatRouteImport.update({
   id: '/api/autumn/$',
   path: '/api/autumn/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiRankingLadderQueriesRoute = ApiRankingLadderQueriesRouteImport.update({
+  id: '/api/ranking-ladder/queries',
+  path: '/api/ranking-ladder/queries',
   getParentRoute: () => rootRouteImport,
 } as any)
 const STokenIndexRoute = STokenIndexRouteImport.update({
@@ -434,6 +440,7 @@ export interface FileRoutesByFullPath {
   '/settings/organization': typeof AppSettingsOrganizationRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/autumn/$': typeof ApiAutumnSplatRoute
+  '/api/ranking-ladder/queries': typeof ApiRankingLadderQueriesRoute
   '/s/$token/og.png': typeof STokenOgDotpngRoute
   '/s/$token/raw': typeof STokenRawRoute
   '/settings/': typeof AppSettingsIndexRoute
@@ -494,6 +501,7 @@ export interface FileRoutesByTo {
   '/settings/organization': typeof AppSettingsOrganizationRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/autumn/$': typeof ApiAutumnSplatRoute
+  '/api/ranking-ladder/queries': typeof ApiRankingLadderQueriesRoute
   '/s/$token/og.png': typeof STokenOgDotpngRoute
   '/s/$token/raw': typeof STokenRawRoute
   '/settings': typeof AppSettingsIndexRoute
@@ -557,6 +565,7 @@ export interface FileRoutesById {
   '/_app/settings/organization': typeof AppSettingsOrganizationRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/autumn/$': typeof ApiAutumnSplatRoute
+  '/api/ranking-ladder/queries': typeof ApiRankingLadderQueriesRoute
   '/s/$token/og.png': typeof STokenOgDotpngRoute
   '/s/$token/raw': typeof STokenRawRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
@@ -621,6 +630,7 @@ export interface FileRouteTypes {
     | '/settings/organization'
     | '/api/auth/$'
     | '/api/autumn/$'
+    | '/api/ranking-ladder/queries'
     | '/s/$token/og.png'
     | '/s/$token/raw'
     | '/settings/'
@@ -681,6 +691,7 @@ export interface FileRouteTypes {
     | '/settings/organization'
     | '/api/auth/$'
     | '/api/autumn/$'
+    | '/api/ranking-ladder/queries'
     | '/s/$token/og.png'
     | '/s/$token/raw'
     | '/settings'
@@ -743,6 +754,7 @@ export interface FileRouteTypes {
     | '/_app/settings/organization'
     | '/api/auth/$'
     | '/api/autumn/$'
+    | '/api/ranking-ladder/queries'
     | '/s/$token/og.png'
     | '/s/$token/raw'
     | '/_app/settings/'
@@ -793,6 +805,7 @@ export interface RootRouteChildren {
   RReportIdRoute: typeof RReportIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiAutumnSplatRoute: typeof ApiAutumnSplatRoute
+  ApiRankingLadderQueriesRoute: typeof ApiRankingLadderQueriesRoute
   STokenOgDotpngRoute: typeof STokenOgDotpngRoute
   STokenRawRoute: typeof STokenRawRoute
   STokenIndexRoute: typeof STokenIndexRoute
@@ -1024,6 +1037,13 @@ declare module '@tanstack/react-router' {
       path: '/api/autumn/$'
       fullPath: '/api/autumn/$'
       preLoaderRoute: typeof ApiAutumnSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/ranking-ladder/queries': {
+      id: '/api/ranking-ladder/queries'
+      path: '/api/ranking-ladder/queries'
+      fullPath: '/api/ranking-ladder/queries'
+      preLoaderRoute: typeof ApiRankingLadderQueriesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/s/$token/': {
@@ -1436,6 +1456,7 @@ const rootRouteChildren: RootRouteChildren = {
   RReportIdRoute: RReportIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiAutumnSplatRoute: ApiAutumnSplatRoute,
+  ApiRankingLadderQueriesRoute: ApiRankingLadderQueriesRoute,
   STokenOgDotpngRoute: STokenOgDotpngRoute,
   STokenRawRoute: STokenRawRoute,
   STokenIndexRoute: STokenIndexRoute,
