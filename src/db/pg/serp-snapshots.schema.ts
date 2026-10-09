@@ -1,5 +1,11 @@
 import { sql } from "drizzle-orm";
-import { index, integer, pgTable, text } from "drizzle-orm/pg-core";
+import {
+  index,
+  integer,
+  pgTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 import { projects } from "./app.schema";
 
 // Timestamps are text, matching the SQLite schema; see pg/app.schema.ts.
@@ -32,6 +38,28 @@ export const serpSnapshots = pgTable(
       table.projectId,
       table.keyword,
       table.collectedAt,
+    ),
+  ],
+);
+
+// Mirror of the SQLite transcript table; see ../serp-snapshots.schema.ts.
+export const serpVideoTranscripts = pgTable(
+  "serp_video_transcripts",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    videoId: text("video_id").notNull(),
+    transcript: text("transcript").notNull(),
+    language: text("language"),
+    fetchedAt: text("fetched_at").notNull(),
+    createdAt: text("created_at").notNull().default(isoNow),
+  },
+  (table) => [
+    uniqueIndex("serp_video_transcripts_project_video_idx").on(
+      table.projectId,
+      table.videoId,
     ),
   ],
 );

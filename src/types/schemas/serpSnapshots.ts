@@ -14,6 +14,17 @@ const shortText = z.string().trim().min(1).max(500);
 
 export const MAX_SNAPSHOTS_PER_INGEST = 50;
 
+export const serpVideoTranscriptInputSchema = z.object({
+  videoId: z.string().trim().min(1).max(200),
+  text: z.string().max(100_000),
+  language: z.string().trim().min(1).max(32).nullish(),
+  fetchedAt: z.iso.datetime({ offset: true }),
+});
+
+export type SerpVideoTranscriptInput = z.infer<
+  typeof serpVideoTranscriptInputSchema
+>;
+
 export const serpSnapshotInputSchema = z.object({
   keyword: z.string().trim().min(1).max(200),
   locationCode: z
@@ -80,4 +91,9 @@ export const ingestSerpSnapshotsBodySchema = z.object({
     .array(serpSnapshotInputSchema)
     .min(1)
     .max(MAX_SNAPSHOTS_PER_INGEST),
+  transcripts: z
+    .array(serpVideoTranscriptInputSchema)
+    .max(100)
+    .optional()
+    .default([]),
 });
