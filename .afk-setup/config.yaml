@@ -72,19 +72,15 @@ roles:
   implementer:
     always: [coduo-implement, karpathy-guidelines]
     offer:
-      [
-        "pstack:typescript-best-practices",
-        "pstack:principle-make-operations-idempotent",
-        tdd,
-      ]
+      - "pstack:typescript-best-practices"
+      - "pstack:principle-make-operations-idempotent"
+      - tdd
     notes: "TanStack Start on Cloudflare Workers, pnpm only (never npm). Schema changes go in both dialects (src/db + drizzle/sqlite and drizzle/pg via pnpm db:generate) and stay compatible with SQLite and Postgres. PostHog event names keep the existing convention. Lanes may run in a cloud sandbox: no live Google, no browser, no Cloudflare deploy, no secrets, no launchd; test parsers against committed fixtures, never the network. Read AGENTS.md before writing tests."
   integrator:
     offer:
-      [
-        resolving-merge-conflicts,
-        "pstack:blast-radius",
-        "pstack:principle-prove-it-works",
-      ]
+      - resolving-merge-conflicts
+      - "pstack:blast-radius"
+      - "pstack:principle-prove-it-works"
 
   # --- reviewers: gate the epic -----------------------------------------------
   verifier:
