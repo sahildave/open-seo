@@ -110,8 +110,7 @@ async function readSavedPages(directory: string): Promise<SavedPage[]> {
   const entries = await readdir(directory, { withFileTypes: true });
   const metaFiles = entries
     .filter((entry) => entry.isFile() && entry.name.endsWith(".meta.json"))
-    .map((entry) => entry.name)
-    .sort();
+    .map((entry) => entry.name);
   const pages: SavedPage[] = [];
 
   for (const metaFile of metaFiles) {
@@ -129,7 +128,11 @@ async function readSavedPages(directory: string): Promise<SavedPage[]> {
       meta: parsedMeta.data,
     });
   }
-  return pages;
+  return pages.sort((left, right) => {
+    const leftTime = left.meta.collectedAt ?? left.meta.capturedAt;
+    const rightTime = right.meta.collectedAt ?? right.meta.capturedAt;
+    return Date.parse(leftTime ?? "") - Date.parse(rightTime ?? "");
+  });
 }
 
 function youtubeVideoId(url: string) {

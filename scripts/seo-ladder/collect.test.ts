@@ -22,13 +22,14 @@ async function writePage(
   name: string,
   html: string,
   finalUrl = "https://www.google.com/search",
+  collectedAt = "2026-10-09T10:00:00.000Z",
 ) {
   await writeFile(join(directory, `${name}.html`), html, "utf8");
   await writeFile(
     join(directory, `${name}.meta.json`),
     JSON.stringify({
       query: name,
-      collectedAt: "2026-10-09T10:00:00.000Z",
+      collectedAt,
       finalUrl,
     }),
     "utf8",
@@ -81,6 +82,35 @@ describe("seo ladder collector", () => {
         .parse(JSON.parse(output.join("")));
       expect(exitCode).toBe(2);
       expect(batch.snapshots).toHaveLength(1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps captures collected before a CAPTCHA regardless of filename order", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "seo-ladder-order-test-"));
+    try {
+      await writePage(
+        directory,
+        "zeta-1",
+        firstPage,
+        "https://www.google.com/search",
+        "2026-10-09T10:00:00.000Z",
+      );
+      await writePage(
+        directory,
+        "alpha-2",
+        await readFile("fixtures/google-serp/captcha.html", "utf8"),
+        "https://www.google.com/sorry/index",
+        "2026-10-09T10:01:00.000Z",
+      );
+
+      const result = await collectFromDirectory(directory, "test");
+
+      expect(result.blocked).toBe(true);
+      expect(
+        result.batch.snapshots.map((snapshot) => snapshot.keyword),
+      ).toEqual(["zeta-1"]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
