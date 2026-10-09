@@ -20,3 +20,7 @@ web/
 # AFK runner output: run artefacts and the generated progress page
 .afk-runs/
 docs/progress.md
+
+# Raw Google captures are parser evidence; preserve their original bytes.
+fixtures/google-serp/*.html
+fixtures/google-serp/*.meta.json
