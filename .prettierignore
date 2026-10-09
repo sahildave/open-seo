@@ -24,3 +24,6 @@ docs/progress.md
 # Raw Google captures are parser evidence; preserve their original bytes.
 fixtures/google-serp/*.html
 fixtures/google-serp/*.meta.json
+
+# Generated per-epic AFK progress pages.
+docs/progress/
