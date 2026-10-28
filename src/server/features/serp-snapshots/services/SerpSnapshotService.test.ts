@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { sort } from "remeda";
+import { readdirSync, readFileSync } from "node:fs";
 import {
   afterAll,
   beforeAll,
@@ -36,27 +37,23 @@ vi.mock("@/db/runBatch", () => ({
 }));
 
 beforeAll(async () => {
-  await client.executeMultiple(
-    [
-      `PRAGMA foreign_keys = ON; CREATE TABLE projects (id text PRIMARY KEY, organization_id text, archived_at text);`,
-      `INSERT INTO projects (id) VALUES ('proj_1');`,
-      ...[
-        "0007_sour_risque.sql",
-        "0008_luxuriant_colossus.sql",
-        "0009_smart_kitty_pryde.sql",
-        "0011_colorful_dark_beast.sql",
-        "0029_location_name.sql",
-        "0045_slimy_master_chief.sql",
-        "0051_rank_keyword_pins.sql",
-        "0059_thankful_aaron_stack.sql",
-        "0063_serp_snapshots.sql",
-      ].flatMap((file) =>
-        readFileSync(`drizzle/sqlite/${file}`, "utf8").split(
-          "--> statement-breakpoint",
-        ),
-      ),
-    ].join("\n"),
+  const migrations = sort(
+    readdirSync("drizzle/sqlite").filter((file) => file.endsWith(".sql")),
+    (a, b) => a.localeCompare(b),
   );
+  for (const file of migrations) {
+    await client.executeMultiple(
+      readFileSync(`drizzle/sqlite/${file}`, "utf8").replaceAll(
+        "--> statement-breakpoint",
+        "",
+      ),
+    );
+  }
+  await client.executeMultiple(`
+    PRAGMA foreign_keys = ON;
+    INSERT INTO organization (id, name, slug, created_at) VALUES ('org_1', 'Test', 'test', 0);
+    INSERT INTO projects (id, organization_id, name, domain) VALUES ('proj_1', 'org_1', 'Test', 'gitsu.app');
+  `);
 });
 
 afterAll(() => {
@@ -95,8 +92,8 @@ const organic = (...urls: string[]) =>
   urls.map((url, i) => ({ position: i + 1, title: url, url }));
 
 describe("ingest", () => {
-  it("mirrors collection days into manual rank history with positions, URLs and features", async () => {
-    const { mirror } = await SerpSnapshotService.ingest(project, [
+  it("maps daily positions, URLs and SERP features into rank history", async () => {
+    await SerpSnapshotService.ingest(project, [
       snapshot({
         keyword: "GitHub Projects Client",
         organic: organic("https://gitsu.app/old"),
@@ -112,43 +109,176 @@ describe("ingest", () => {
         videos: [{ title: "Gitsu", url: "https://youtube.com/watch?v=gitsu" }],
         aiOverview: { present: true },
       }),
+    ]);
+    expect(
+      (
+        await client.execute(
+          "SELECT keyword, position, url, checked_at, serp_features FROM rank_snapshots ORDER BY checked_at",
+        )
+      ).rows,
+    ).toEqual([
+      {
+        keyword: "github projects client",
+        position: 1,
+        url: "https://gitsu.app/old",
+        checked_at: "2026-10-01 10:00:00",
+        serp_features: '["organic"]',
+      },
+      {
+        keyword: "github projects client",
+        position: 2,
+        url: "https://docs.gitsu.app/guide",
+        checked_at: "2026-10-02 06:30:00",
+        serp_features: '["organic","people_also_ask","video","ai_overview"]',
+      },
+    ]);
+  });
+
+  it("backfills stored history when the first manual tracker is created", async () => {
+    await SerpSnapshotService.ingest({ ...project, domain: null }, [
+      snapshot({}),
+    ]);
+    const { mirror } = await SerpSnapshotService.ingest(project, [
+      snapshot({ collectedAt: "2026-10-02T10:00:00Z" }),
+    ]);
+    expect(mirror.runsWritten).toBe(2);
+    expect(
+      (
+        await client.execute(
+          "SELECT started_at FROM rank_check_runs ORDER BY started_at",
+        )
+      ).rows,
+    ).toEqual([
+      { started_at: "2026-10-01 10:00:00" },
+      { started_at: "2026-10-02 10:00:00" },
+    ]);
+  });
+
+  it("keeps rank history idempotent when the same batch is ingested again", async () => {
+    const batch = [snapshot({})];
+    await SerpSnapshotService.ingest(project, batch);
+    await SerpSnapshotService.ingest(project, batch);
+    expect(
+      (
+        await client.execute(`SELECT
+      (SELECT count(*) FROM rank_tracking_configs) AS configs,
+      (SELECT count(*) FROM rank_tracking_keywords) AS keywords,
+      (SELECT count(*) FROM rank_check_runs) AS runs,
+      (SELECT count(*) FROM rank_snapshots) AS ranks`)
+      ).rows[0],
+    ).toEqual({ configs: 1, keywords: 1, runs: 1, ranks: 1 });
+  });
+
+  it("keeps the latest capture within a day across out-of-order pushes", async () => {
+    await SerpSnapshotService.ingest(project, [
       snapshot({
-        keyword: "other",
-        device: "mobile",
-        collectedAt: "2026-10-02T08:00:00Z",
-        organic: [{ position: 15, title: "Other", url: "https://other.app" }],
+        collectedAt: "2026-10-01T11:00:00Z",
+        organic: organic("https://other.app", "https://gitsu.app/new"),
       }),
     ]);
-    expect(mirror).toEqual({
-      configsTouched: 1,
-      runsWritten: 2,
+    await SerpSnapshotService.ingest(project, [
+      snapshot({ organic: organic("https://gitsu.app/old") }),
+    ]);
+    expect(
+      (
+        await client.execute(
+          "SELECT position, url, checked_at FROM rank_snapshots",
+        )
+      ).rows,
+    ).toEqual([
+      {
+        position: 2,
+        url: "https://gitsu.app/new",
+        checked_at: "2026-10-01 11:00:00",
+      },
+    ]);
+  });
+
+  it("leaves scheduled trackers unchanged and reports their skipped markets", async () => {
+    await RankTrackingRepository.createConfig({
+      id: "scheduled",
+      projectId: project.id,
+      domain: project.domain,
+      locationCode: 2840,
+      languageCode: "en",
+      devices: "desktop",
+      serpDepth: 10,
+      scheduleInterval: "weekly",
     });
+    await RankTrackingRepository.addKeywordsToConfig([
+      { id: "existing", configId: "scheduled", keyword: "existing" },
+    ]);
+    const { mirror } = await SerpSnapshotService.ingest(project, [
+      snapshot({
+        device: "mobile",
+        organic: [{ position: 15, title: "Gitsu", url: "https://gitsu.app/" }],
+      }),
+    ]);
     const [config] = await RankTrackingRepository.getConfigsForProject(
       project.id,
     );
     expect(config).toMatchObject({
-      domain: "gitsu.app",
-      locationCode: 2840,
-      languageCode: "en",
-      locationName: null,
-      scheduleInterval: "manual",
-      devices: "both",
-      serpDepth: 20,
+      id: "scheduled",
+      devices: "desktop",
+      serpDepth: 10,
+      scheduleInterval: "weekly",
     });
     expect(
-      await RankTrackingRepository.getDueConfigsWithOrganization("2099-01-01"),
-    ).toEqual([]);
-    const keywords = await RankTrackingRepository.getKeywordsForConfig(
-      config.id,
-    );
-    expect(keywords.map((k) => k.keyword)).toEqual(
-      expect.arrayContaining(["github projects client", "other"]),
-    );
-    expect(keywords[0]).toMatchObject({
-      searchVolume: null,
-      keywordDifficulty: null,
-      cpc: null,
+      (await RankTrackingRepository.getKeywordsForConfig("scheduled")).map(
+        (k) => k.keyword,
+      ),
+    ).toEqual(["existing"]);
+    expect(mirror).toEqual({
+      configsTouched: 0,
+      runsWritten: 0,
+      skippedMarkets: [{ locationCode: 2840, languageCode: "en" }],
     });
+  });
+
+  it("mirrors only the incoming UTC days after a tracker exists", async () => {
+    await SerpSnapshotService.ingest(project, [snapshot({})]);
+    // This offset falls on October 2 in UTC, despite the local October 3 date.
+    const { mirror } = await SerpSnapshotService.ingest(project, [
+      snapshot({ collectedAt: "2026-10-03T01:00:00+05:30" }),
+    ]);
+    expect(mirror.runsWritten).toBe(1);
+    expect(
+      (
+        await client.execute(
+          "SELECT started_at FROM rank_check_runs ORDER BY started_at",
+        )
+      ).rows,
+    ).toEqual([
+      { started_at: "2026-10-01 10:00:00" },
+      { started_at: "2026-10-02 19:30:00" },
+    ]);
+  });
+
+  it("creates manual trackers with devices and depth covering the captures", async () => {
+    await SerpSnapshotService.ingest(project, [
+      snapshot({}),
+      snapshot({
+        device: "mobile",
+        organic: [{ position: 15, title: "Other", url: "https://other.app" }],
+      }),
+    ]);
+    expect(
+      await RankTrackingRepository.getConfigsForProject(project.id),
+    ).toEqual([
+      expect.objectContaining({
+        scheduleInterval: "manual",
+        devices: "both",
+        serpDepth: 20,
+      }),
+    ]);
+  });
+
+  it("summarizes daily keyword coverage and UTC collection bounds", async () => {
+    await SerpSnapshotService.ingest(project, [
+      snapshot({}),
+      snapshot({ collectedAt: "2026-10-02T12:00:00+05:30" }),
+      snapshot({ keyword: "other", collectedAt: "2026-10-02T08:00:00Z" }),
+    ]);
     expect(
       (
         await client.execute(
@@ -171,121 +301,35 @@ describe("ingest", () => {
         completed_at: "2026-10-02 08:00:00",
       },
     ]);
-    const ranks = await RankTrackingRepository.getSnapshotsForRun(
-      `serp-${config.id}-2026-10-02`,
-    );
-    expect(ranks).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          keyword: "github projects client",
-          device: "desktop",
-          position: 2,
-          url: "https://docs.gitsu.app/guide",
-          checkedAt: "2026-10-02 06:30:00",
-          serpFeatures: JSON.stringify([
-            "organic",
-            "people_also_ask",
-            "video",
-            "ai_overview",
-          ]),
-        }),
-        expect.objectContaining({
-          keyword: "other",
-          device: "mobile",
-          position: null,
-          url: null,
-          serpFeatures: '["organic"]',
-        }),
-      ]),
-    );
   });
 
-  it("backfills stored captures and keeps daily ranks idempotent while accepting newer captures", async () => {
-    const batch = [snapshot({ organic: organic("https://gitsu.app/old") })];
-    await SerpSnapshotService.ingest(project, batch);
-    // Simulate captures stored before mirroring shipped.
-    await client.executeMultiple(
-      "DELETE FROM rank_snapshots; DELETE FROM rank_tracking_configs;",
+  it("stores captures without mirroring when the project has no domain", async () => {
+    const { mirror } = await SerpSnapshotService.ingest(
+      { ...project, domain: null },
+      [snapshot({})],
     );
-    await SerpSnapshotService.ingest(project, [
-      snapshot({ keyword: "second", collectedAt: "2026-10-02T10:00:00Z" }),
-    ]);
-    const counts = async () =>
-      (
-        await client.execute(`SELECT
-      (SELECT count(*) FROM rank_tracking_configs) AS configs,
-      (SELECT count(*) FROM rank_tracking_keywords) AS keywords,
-      (SELECT count(*) FROM rank_check_runs) AS runs,
-      (SELECT count(*) FROM rank_snapshots) AS ranks`)
-      ).rows[0];
-    expect(await counts()).toEqual({
-      configs: 1,
-      keywords: 2,
-      runs: 2,
-      ranks: 2,
-    });
-    await SerpSnapshotService.ingest(project, batch);
-    expect(await counts()).toEqual({
-      configs: 1,
-      keywords: 2,
-      runs: 2,
-      ranks: 2,
-    });
-    await SerpSnapshotService.ingest(project, [
-      snapshot({
-        collectedAt: "2026-10-01T11:00:00Z",
-        organic: organic("https://other.app", "https://gitsu.app/new"),
-      }),
-    ]);
-    await SerpSnapshotService.ingest(project, batch);
-    expect(await counts()).toEqual({
-      configs: 1,
-      keywords: 2,
-      runs: 2,
-      ranks: 2,
-    });
-    const [config] = await RankTrackingRepository.getConfigsForProject(
-      project.id,
-    );
+    expect(mirror.configsTouched).toBe(0);
     expect(
-      await RankTrackingRepository.getSnapshotsForRun(
-        `serp-${config.id}-2026-10-01`,
-      ),
-    ).toEqual([
-      expect.objectContaining({
-        position: 2,
-        url: "https://gitsu.app/new",
-        checkedAt: "2026-10-01 11:00:00",
-      }),
-    ]);
+      await RankTrackingRepository.getConfigsForProject(project.id),
+    ).toEqual([]);
+    expect(
+      (await client.execute("SELECT count(*) AS total FROM serp_snapshots"))
+        .rows[0].total,
+    ).toBe(1);
   });
 
-  it("skips mirroring without a domain and separates languages into their own configs", async () => {
-    expect(
-      (
-        await SerpSnapshotService.ingest({ ...project, domain: null }, [
-          snapshot({}),
-        ])
-      ).mirror.configsTouched,
-    ).toBe(0);
-    const { mirror } = await SerpSnapshotService.ingest(project, [
+  it("separates languages into their own trackers", async () => {
+    await SerpSnapshotService.ingest(project, [
+      snapshot({}),
       snapshot({ languageCode: "fr" }),
     ]);
-    expect(mirror).toEqual({
-      configsTouched: 2,
-      runsWritten: 2,
-    });
     expect(
       (await RankTrackingRepository.getConfigsForProject(project.id)).map(
         (c) => c.languageCode,
       ),
     ).toEqual(expect.arrayContaining(["en", "fr"]));
     expect(
-      (await client.execute("SELECT count(*) AS total FROM rank_snapshots"))
-        .rows[0].total,
-    ).toBe(2);
-    expect(
-      (await client.execute("SELECT count(*) AS total FROM serp_snapshots"))
+      (await client.execute("SELECT count(*) AS total FROM rank_check_runs"))
         .rows[0].total,
     ).toBe(2);
   });

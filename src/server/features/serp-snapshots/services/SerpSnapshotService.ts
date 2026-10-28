@@ -1,10 +1,8 @@
 import { findOurResult } from "./serpSnapshotPosition";
 import type { SerpSnapshotInput } from "@/types/schemas/serpSnapshots";
 import { mirrorToRankTracking } from "./mirrorToRankTracking";
-import {
-  SerpSnapshotRepository,
-  type SerpSnapshotRow,
-} from "../repositories/SerpSnapshotRepository";
+import { parseSerpSnapshot, type SerpSnapshot } from "./serpSnapshotParsing";
+import { SerpSnapshotRepository } from "../repositories/SerpSnapshotRepository";
 
 type SnapshotProject = {
   id: string;
@@ -12,8 +10,6 @@ type SnapshotProject = {
   locationCode: number;
   languageCode: string;
 };
-
-type OrganicResult = SerpSnapshotInput["organic"][number];
 
 async function ingest(
   project: SnapshotProject,
@@ -38,12 +34,7 @@ async function ingest(
       findOurResult(project.domain, snapshot.organic)?.position ?? null,
   }));
   await SerpSnapshotRepository.insertMany(rows);
-  const mirror = await mirrorToRankTracking(
-    project,
-    project.domain
-      ? (await SerpSnapshotRepository.listForProject(project.id)).map(parseRow)
-      : [],
-  );
+  const mirror = await mirrorToRankTracking(project, rows);
   const inserted = rows.map((row) => ({
     id: row.id,
     keyword: row.keyword,
@@ -52,32 +43,6 @@ async function ingest(
   }));
   return { inserted, mirror };
 }
-
-function parseRow(row: SerpSnapshotRow) {
-  return {
-    id: row.id,
-    keyword: row.keyword,
-    locationCode: row.locationCode,
-    languageCode: row.languageCode,
-    device: row.device,
-    source: row.source,
-    collectedAt: row.collectedAt,
-    ourPosition: row.ourPosition,
-    // Written by ingest() from validated input, so the shapes are known.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see above
-    organic: JSON.parse(row.organic) as OrganicResult[],
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see above
-    paa: JSON.parse(row.paa) as string[],
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see above
-    related: JSON.parse(row.related) as string[],
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see above
-    videos: JSON.parse(row.videos) as SerpSnapshotInput["videos"],
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see above
-    aiOverview: JSON.parse(row.aiOverview) as SerpSnapshotInput["aiOverview"],
-  };
-}
-
-export type SerpSnapshot = ReturnType<typeof parseRow>;
 
 // Compare URLs without the noise Google adds between captures.
 function urlKey(url: string) {
@@ -127,13 +92,15 @@ async function list(params: {
   const rows = await SerpSnapshotRepository.listLatest(params);
   return Promise.all(
     rows.map(async (row) => {
-      const snapshot = parseRow(row);
+      const snapshot = parseSerpSnapshot(row);
       if (!params.diff) return { snapshot, diff: undefined };
       const previous = await SerpSnapshotRepository.getPrevious(row);
       return {
         snapshot,
         // null = first capture for this keyword/device/market; nothing to diff.
-        diff: previous ? diffSnapshots(snapshot, parseRow(previous)) : null,
+        diff: previous
+          ? diffSnapshots(snapshot, parseSerpSnapshot(previous))
+          : null,
       };
     }),
   );

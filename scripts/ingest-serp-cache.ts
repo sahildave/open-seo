@@ -19,28 +19,52 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
+import { z } from "zod";
 import {
   ingestSerpSnapshotsBodySchema,
+  serpSnapshotInputSchema,
   type SerpSnapshotInput,
 } from "../src/types/schemas/serpSnapshots";
 import { parseArgs } from "./cli-utils";
 
-type Raw = Record<string, any>;
+const collectorVideoSchema = z.object({
+  url: z.string(),
+  title: z.string().nullish(),
+  text: z.string().nullish(),
+  position: z.number().int().nullish(),
+});
+
+const collectorCaptureSchema = z.object({
+  query: z.string(),
+  readAt: z.string().nullish(),
+  collected_at: z.string().nullish(),
+  organic: serpSnapshotInputSchema.shape.organic,
+  paa: z.array(z.unknown()).default([]),
+  related: z.array(z.string()).nullish(),
+  videos: z.array(collectorVideoSchema).default([]),
+  aiOverviewPresent: z.boolean().nullish(),
+  ai_overview: z
+    .object({
+      present: z.boolean().optional(),
+      text: z.string().nullish(),
+    })
+    .nullish(),
+});
 
 // Collector fields the snapshot schema has no column for. Listed on every run
 // so nothing is dropped silently.
 const DROPPED = [
   "n, finalUrl / results_url / hasSearchUrl, captcha (run metadata)",
-  "gitsuInTop10 / gitsu_in_organic (the server recomputes our position from organic)",
+  "collector-computed ranking flags (the server recomputes our position from organic)",
   "organic[].domain (derivable from url)",
-  "aiOverviewMentionsGitsu / ai_overview.names_gitsu (no column: AI Overview naming the product)",
+  "collector-specific product mentions in the AI Overview (no column)",
   "ai_overview.product_names_seen / names_any_product_hint",
   "videos[].domain, videos[].text (channel is parsed out of text when present)",
   "note / videosNote (collector caveats)",
   "related on tracked files: Google's tab bar (AI Mode, Videos, ...), not related searches",
 ];
 
-function readJson(path: string): Raw {
+function readJson(path: string): unknown {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
@@ -60,12 +84,14 @@ const isDuration = (text: string) => /^\d{1,2}(:\d{2}){1,2}$/u.test(text);
 // The collector lists one video several times (thumbnail, title, duration).
 // Keep one entry per URL, the first real title, and the channel from the
 // "YouTube · <channel>" line when the card text carries it.
-function mapVideos(raw: Raw[]): SerpSnapshotInput["videos"] {
+function mapVideos(
+  raw: z.infer<typeof collectorVideoSchema>[],
+): SerpSnapshotInput["videos"] {
   const byUrl = new Map<string, SerpSnapshotInput["videos"][number]>();
   for (const video of raw) {
-    const title = String(video.title ?? "").trim();
+    const title = (video.title ?? "").trim();
     const channel =
-      /YouTube · ([^\n]+)/u.exec(String(video.text ?? ""))?.[1]?.trim() ?? null;
+      /YouTube · ([^\n]+)/u.exec(video.text ?? "")?.[1]?.trim() ?? null;
     const existing = byUrl.get(video.url);
     if (!existing) {
       byUrl.set(video.url, {
@@ -82,14 +108,15 @@ function mapVideos(raw: Raw[]): SerpSnapshotInput["videos"] {
   return [...byUrl.values()];
 }
 
-function toSnapshot(raw: Raw, tracked: boolean): SerpSnapshotInput {
+function toSnapshot(input: unknown, tracked: boolean): SerpSnapshotInput {
+  const raw = collectorCaptureSchema.parse(input);
   const aiOverview = raw.ai_overview ?? {};
-  return {
+  return serpSnapshotInputSchema.parse({
     keyword: raw.query,
     device: "desktop",
     source: "ego-browser",
     collectedAt: raw.readAt ?? raw.collected_at,
-    organic: raw.organic.map((result: Raw) => ({
+    organic: raw.organic.map((result) => ({
       position: result.position,
       title: result.title,
       url: result.url,
@@ -97,13 +124,13 @@ function toSnapshot(raw: Raw, tracked: boolean): SerpSnapshotInput {
     paa: raw.paa.filter(
       (q: unknown) => typeof q === "string" && q.trim().length > 0,
     ),
-    related: tracked ? [] : raw.related,
+    related: tracked ? [] : (raw.related ?? []),
     videos: mapVideos(raw.videos),
     aiOverview: {
-      present: Boolean(raw.aiOverviewPresent ?? aiOverview.present),
+      present: raw.aiOverviewPresent ?? aiOverview.present ?? false,
       excerpt: aiOverview.text ?? null,
     },
-  } as SerpSnapshotInput;
+  });
 }
 
 async function main() {
@@ -165,7 +192,7 @@ async function main() {
   const body = await response.text();
   console.log(body);
   if (response.status === 201) {
-    const result = JSON.parse(body);
+    const result = z.object({ mirror: z.unknown() }).parse(JSON.parse(body));
     console.log("Rank tracking mirror:", result.mirror);
   }
   if (response.status !== 201) process.exit(1);

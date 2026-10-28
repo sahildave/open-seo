@@ -2,6 +2,7 @@ import { RankTrackingRepository } from "@/server/features/rank-tracking/reposito
 import type { rankTrackingKeywords } from "@/db/schema";
 import { AppError } from "@/server/lib/errors";
 import {
+  normalizeRankTrackingKeyword,
   devicesCount,
   estimateRankCheckCredits,
   estimateScheduledRankCheckCredits,
@@ -40,8 +41,7 @@ async function addKeywords(
 
   for (const raw of keywords) {
     if (rows.length >= available) break;
-    const trimmed = raw.trim();
-    const normalized = matchCase ? trimmed : trimmed.toLowerCase();
+    const normalized = normalizeRankTrackingKeyword(raw, matchCase);
     if (
       normalized &&
       !seen.has(normalized) &&

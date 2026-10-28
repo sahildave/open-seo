@@ -40,6 +40,12 @@ export const ingestSerpSnapshotsTool = {
       mirror: z.looseObject({
         configsTouched: z.number(),
         runsWritten: z.number(),
+        skippedMarkets: z.array(
+          z.looseObject({
+            locationCode: z.number(),
+            languageCode: z.string(),
+          }),
+        ),
       }),
       ...optionalMetaOutputSchema,
     }),
@@ -65,7 +71,10 @@ export const ingestSerpSnapshotsTool = {
                 `- ${row.keyword}  ours:${row.ourPosition ?? "not ranked"}`,
             )
             .join("\n") +
-          `\nRank tracking: ${mirror.configsTouched} config(s), ${mirror.runsWritten} daily run(s).`,
+          `\nRank tracking: ${mirror.configsTouched} config(s), ${mirror.runsWritten} daily run(s).` +
+          (mirror.skippedMarkets.length
+            ? ` Skipped markets with scheduled trackers: ${mirror.skippedMarkets.map((market) => `${market.locationCode}/${market.languageCode}`).join(", ")}.`
+            : ""),
         meta: buildProjectMeta(context, args.projectId),
         structuredContent: { inserted, mirror },
       });

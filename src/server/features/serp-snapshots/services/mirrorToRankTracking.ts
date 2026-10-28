@@ -1,17 +1,26 @@
 import { RankTrackingRepository } from "@/server/features/rank-tracking/repositories/RankTrackingRepository";
 import { toRankTrackingTimestamp } from "@/server/features/rank-tracking/rankTrackingTimestamps";
-import type { SerpSnapshot } from "./SerpSnapshotService";
+import {
+  SerpSnapshotRepository,
+  type SerpSnapshotRow,
+} from "../repositories/SerpSnapshotRepository";
+import { parseSerpSnapshot, type SerpSnapshot } from "./serpSnapshotParsing";
+import { normalizeRankTrackingKeyword } from "@/shared/rank-tracking";
 import { findOurResult } from "./serpSnapshotPosition";
 
 export async function mirrorToRankTracking(
   project: { id: string; domain: string | null },
-  snapshots: SerpSnapshot[],
+  snapshots: Pick<
+    SerpSnapshotRow,
+    "locationCode" | "languageCode" | "collectedAt" | "device"
+  >[],
 ) {
-  const result = { configsTouched: 0, runsWritten: 0 };
+  const skippedMarkets: { locationCode: number; languageCode: string }[] = [];
+  const result = { configsTouched: 0, runsWritten: 0, skippedMarkets };
   const domain = project.domain;
   if (!domain) return result;
 
-  const markets = new Map<string, SerpSnapshot[]>();
+  const markets = new Map<string, typeof snapshots>();
   for (const snapshot of snapshots) {
     const key = `${snapshot.locationCode}:${snapshot.languageCode}`;
     const group = markets.get(key) ?? [];
@@ -19,8 +28,8 @@ export async function mirrorToRankTracking(
     markets.set(key, group);
   }
 
-  for (const captures of markets.values()) {
-    const { locationCode, languageCode } = captures[0];
+  for (const incoming of markets.values()) {
+    const { locationCode, languageCode } = incoming[0];
     const lookup = () =>
       RankTrackingRepository.getConfigByProjectDomainMarket(
         project.id,
@@ -30,6 +39,7 @@ export async function mirrorToRankTracking(
         null,
       );
     let config = await lookup();
+    let created = false;
     if (!config) {
       try {
         await RankTrackingRepository.createConfig({
@@ -39,10 +49,11 @@ export async function mirrorToRankTracking(
           locationCode,
           languageCode,
           locationName: null,
-          devices: captures[0].device,
+          devices: incoming[0].device,
           serpDepth: 10,
           scheduleInterval: "manual",
         });
+        created = true;
       } catch (error) {
         // A concurrent ingest can win the config's unique key. Re-read only
         // that key; unrelated database failures must still surface.
@@ -51,6 +62,23 @@ export async function mirrorToRankTracking(
       config = await lookup();
     }
     if (!config) throw new Error("Rank tracking config was not created");
+
+    if (config.scheduleInterval !== "manual") {
+      skippedMarkets.push({ locationCode, languageCode });
+      continue;
+    }
+    const rows = await SerpSnapshotRepository.listForMarket({
+      projectId: project.id,
+      locationCode,
+      languageCode,
+      days: created
+        ? undefined
+        : [...new Set(incoming.map((s) => s.collectedAt.slice(0, 10)))],
+    });
+    const captures = rows.map((row) => ({
+      ...parseSerpSnapshot(row),
+      keyword: normalizeRankTrackingKeyword(row.keyword),
+    }));
 
     const devices = new Set(captures.map((s) => s.device));
     devices.add(config.devices === "both" ? "desktop" : config.devices);
@@ -67,13 +95,11 @@ export async function mirrorToRankTracking(
       serpDepth,
     });
     await RankTrackingRepository.addKeywordsToConfig(
-      [...new Set(captures.map((s) => s.keyword.trim().toLowerCase()))].map(
-        (keyword) => ({
-          id: crypto.randomUUID(),
-          configId: config.id,
-          keyword,
-        }),
-      ),
+      [...new Set(captures.map((s) => s.keyword))].map((keyword) => ({
+        id: crypto.randomUUID(),
+        configId: config.id,
+        keyword,
+      })),
     );
     const keywords = await RankTrackingRepository.getKeywordsForConfig(
       config.id,
@@ -91,14 +117,9 @@ export async function mirrorToRankTracking(
       const latest = new Map<string, SerpSnapshot>();
       // Repository orders captures oldest first; the last keyword/device wins.
       for (const capture of collected) {
-        latest.set(
-          `${capture.keyword.trim().toLowerCase()}:${capture.device}`,
-          capture,
-        );
+        latest.set(`${capture.keyword}:${capture.device}`, capture);
       }
-      const keywordCount = new Set(
-        collected.map((s) => s.keyword.trim().toLowerCase()),
-      ).size;
+      const keywordCount = new Set(collected.map((s) => s.keyword)).size;
       await RankTrackingRepository.upsertCollectedRun(
         {
           id: runId,
@@ -116,7 +137,7 @@ export async function mirrorToRankTracking(
           ),
         },
         [...latest.values()].map((capture) => {
-          const keyword = capture.keyword.trim().toLowerCase();
+          const keyword = capture.keyword;
           const trackingKeywordId = keywordIds.get(keyword);
           if (!trackingKeywordId)
             throw new Error("Mirrored keyword was not created");
