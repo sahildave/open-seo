@@ -13,7 +13,7 @@ Implemented in `codex/serp-snapshots-rank-tracking`, based on this plan's commit
 - The cache ingest script is included, with mirror-result printing. No schema migration, plugin version change, UI change or deployment was needed.
 - Real SQLite tests cover daily mappings, backfill, repeated ingest, newer captures and domain/language guards. Removing snapshot conflict handling made the idempotency test fail on the intended unique constraint; restoring it passed.
 
-Validation: the full suite passed (1,552 tests, one skipped). TypeScript, Knip, lint and plugin-skill sync passed. The root format check remains blocked by eight pre-existing Google SERP HTML/metadata fixture files; their raw contents were left unchanged. The new and changed files are formatted. Checks ran through the installed local binaries because pnpm could not fetch its pinned version in this environment. Snyk reported no findings in changed files; its 39 repository findings are outside this change.
+Validation after merging current `origin/main`: `pnpm run ci:check` passed and `pnpm run test:ci` passed all 1,819 tests. Main already excludes raw Google SERP fixtures from formatting, resolving the earlier blocker. Snyk reported no findings in the snapshot feature. No deployment or live-data verification was performed.
 
 ## Goal
 
