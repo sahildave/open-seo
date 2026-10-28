@@ -46,11 +46,8 @@ async function handleSerpSnapshotIngest(request: Request): Promise<Response> {
     return Response.json({ error: "Project not found" }, { status: 404 });
   }
 
-  const inserted = await SerpSnapshotService.ingest(
-    project,
-    body.data.snapshots,
-  );
-  return Response.json({ inserted }, { status: 201 });
+  const result = await SerpSnapshotService.ingest(project, body.data.snapshots);
+  return Response.json(result, { status: 201 });
 }
 
 export const Route = createFileRoute("/api/serp-snapshots")({

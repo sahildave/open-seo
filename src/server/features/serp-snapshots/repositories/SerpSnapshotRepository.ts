@@ -1,4 +1,4 @@
-import { and, desc, eq, lt } from "drizzle-orm";
+import { and, desc, eq, lt, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { runBatch } from "@/db/runBatch";
 import { serpSnapshots } from "@/db/schema";
@@ -34,6 +34,34 @@ async function listLatest(params: {
     .limit(params.limit);
 }
 
+async function listForMarket(params: {
+  projectId: string;
+  locationCode: number;
+  languageCode: string;
+  days?: string[];
+}) {
+  if (params.days?.length === 0) return [];
+  return db
+    .select()
+    .from(serpSnapshots)
+    .where(
+      and(
+        eq(serpSnapshots.projectId, params.projectId),
+        eq(serpSnapshots.locationCode, params.locationCode),
+        eq(serpSnapshots.languageCode, params.languageCode),
+        // Captures are UTC ISO strings. At most 50 incoming days bind at once,
+        // staying below D1's parameter limit on both database providers.
+        params.days
+          ? inArray(
+              sql<string>`substr(${serpSnapshots.collectedAt}, 1, 10)`,
+              params.days,
+            )
+          : undefined,
+      ),
+    )
+    .orderBy(serpSnapshots.collectedAt, serpSnapshots.id);
+}
+
 // The snapshot collected immediately before `row` for the same keyword,
 // device and market — the baseline a diff compares against.
 async function getPrevious(row: SerpSnapshotRow) {
@@ -57,6 +85,7 @@ async function getPrevious(row: SerpSnapshotRow) {
 
 export const SerpSnapshotRepository = {
   insertMany,
+  listForMarket,
   listLatest,
   getPrevious,
 };

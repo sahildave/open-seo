@@ -8,6 +8,15 @@ import type {
   RankTrackingConfig,
 } from "@/types/schemas/rank-tracking";
 
+/** Shared keyword identity for tracker additions and collected SERP history. */
+export function normalizeRankTrackingKeyword(
+  keyword: string,
+  matchCase = false,
+): string {
+  const trimmed = keyword.trim();
+  return matchCase ? trimmed : trimmed.toLowerCase();
+}
+
 // ---------------------------------------------------------------------------
 // Cost constants
 // ---------------------------------------------------------------------------
