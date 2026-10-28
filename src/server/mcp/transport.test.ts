@@ -11,7 +11,7 @@ import {
 } from "@/server/mcp/transport";
 
 const selfHostedAuthMocks = vi.hoisted(() => ({
-  resolveCloudflareAccessContext: vi.fn(),
+  resolveCloudflareAccessMcpContext: vi.fn(),
   resolveLocalNoAuthContext: vi.fn(),
   createOpenSeoMcpServer: vi.fn(),
   createMcpHandler: vi.fn(),
@@ -27,8 +27,8 @@ vi.mock("@/server/auth/repositories/AuthRepository", () => ({
 }));
 
 vi.mock("@/middleware/ensure-user/cloudflareAccess", () => ({
-  resolveCloudflareAccessContext:
-    selfHostedAuthMocks.resolveCloudflareAccessContext,
+  resolveCloudflareAccessMcpContext:
+    selfHostedAuthMocks.resolveCloudflareAccessMcpContext,
 }));
 
 vi.mock("@/middleware/ensure-user/delegated", () => ({
@@ -133,7 +133,7 @@ describe("handleSelfHostedOpenSeoMcpRequest", () => {
       userEmail: "admin@localhost",
       organizationId: "delegated-local-admin",
     });
-    selfHostedAuthMocks.resolveCloudflareAccessContext.mockResolvedValue({
+    selfHostedAuthMocks.resolveCloudflareAccessMcpContext.mockResolvedValue({
       userId: "cloudflare-user",
       userEmail: "person@example.com",
       organizationId: "delegated-cloudflare-user",
@@ -152,7 +152,7 @@ describe("handleSelfHostedOpenSeoMcpRequest", () => {
     ],
     [
       "cloudflare_access" as const,
-      selfHostedAuthMocks.resolveCloudflareAccessContext,
+      selfHostedAuthMocks.resolveCloudflareAccessMcpContext,
       {
         userId: "cloudflare-user",
         userEmail: "person@example.com",
@@ -203,7 +203,7 @@ describe("handleSelfHostedOpenSeoMcpRequest", () => {
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("");
     expect(
-      selfHostedAuthMocks.resolveCloudflareAccessContext,
+      selfHostedAuthMocks.resolveCloudflareAccessMcpContext,
     ).not.toHaveBeenCalled();
     expect(selfHostedAuthMocks.createOpenSeoMcpServer).not.toHaveBeenCalled();
   });

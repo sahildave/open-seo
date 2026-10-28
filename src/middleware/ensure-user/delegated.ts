@@ -4,7 +4,8 @@ import {
   ensureDelegatedOrganizationForUser,
   ensureSharedWorkspaceOrganization,
 } from "@/server/auth/delegated-organization";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
+import { AppError } from "@/server/lib/errors";
 import type { EnsuredUserContext } from "./types";
 
 const LOCAL_ADMIN_USER_ID = "local-admin";
@@ -100,4 +101,25 @@ export async function resolveSharedWorkspaceContext(
 
 export async function resolveLocalNoAuthContext(): Promise<EnsuredUserContext> {
   return resolveDelegatedContext(LOCAL_ADMIN_USER_ID, LOCAL_ADMIN_EMAIL);
+}
+
+export async function resolveSharedWorkspaceOwnerContext(): Promise<EnsuredUserContext> {
+  // Access workspaces have no member rows. The first person who signed in
+  // owns the workspace; machine callers reuse that identity without creating
+  // or updating a user record.
+  const [owner] = await db
+    .select({ id: user.id, email: user.email })
+    .from(user)
+    .orderBy(asc(user.createdAt), asc(user.id))
+    .limit(1);
+
+  if (!owner) throw new AppError("UNAUTHENTICATED");
+
+  return {
+    userId: owner.id,
+    userEmail: owner.email,
+    emailVerified: true,
+    organizationId: await ensureSharedWorkspaceOrganization(),
+    role: "owner",
+  };
 }
