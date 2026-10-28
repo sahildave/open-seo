@@ -9,7 +9,11 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as CampaignRouteImport } from './routes/_campaign'
 import { Route as MarketingRouteImport } from './routes/_marketing'
+import { Route as AgentSetupDottxtRouteImport } from './routes/agent-setup[.]txt'
+import { Route as CampaignAgenciesRouteImport } from './routes/_campaign/agencies'
+import { Route as CampaignAgentsRouteImport } from './routes/_campaign/agents'
 import { Route as MarketingIndexRouteImport } from './routes/_marketing/index'
 import { Route as MarketingAboutRouteImport } from './routes/_marketing/about'
 import { Route as MarketingAhrefsAlternativeRouteImport } from './routes/_marketing/ahrefs-alternative'
@@ -40,6 +44,7 @@ import { Route as ApiCompetitorKeywordFinderRouteImport } from './routes/api/com
 import { Route as ApiDomainAgeCheckerRouteImport } from './routes/api/domain-age-checker'
 import { Route as ApiEventRouteImport } from './routes/api/event'
 import { Route as ApiKeywordGeneratorRouteImport } from './routes/api/keyword-generator'
+import { Route as ApiPrivacyRegionRouteImport } from './routes/api/privacy-region'
 import { Route as ApiSpamScoreCheckerRouteImport } from './routes/api/spam-score-checker'
 import { Route as ApiSubscribeRouteImport } from './routes/api/subscribe'
 import { Route as ApiWebsiteTrafficCheckerRouteImport } from './routes/api/website-traffic-checker'
@@ -47,8 +52,10 @@ import { Route as BlogsIndexRouteImport } from './routes/blogs/index'
 import { Route as BlogsSplatRouteImport } from './routes/blogs/$'
 import { Route as DocsIndexRouteImport } from './routes/docs/index'
 import { Route as DocsSplatRouteImport } from './routes/docs/$'
+import { Route as DocsLlmsDottxtRouteImport } from './routes/docs/llms[.]txt'
 import { Route as GuidesIndexRouteImport } from './routes/guides/index'
 import { Route as GuidesSplatRouteImport } from './routes/guides/$'
+import { Route as JsMetaDotjsRouteImport } from './routes/js/meta[.]js'
 import { Route as JsScriptDotjsRouteImport } from './routes/js/script[.]js'
 import { Route as MarketingFeaturesIndexRouteImport } from './routes/_marketing/features/index'
 import { Route as MarketingFeaturesAiBrandVisibilityRouteImport } from './routes/_marketing/features/ai-brand-visibility'
@@ -95,9 +102,28 @@ import { Route as MarketingLibrarySiteAuditIndexBloatRouteImport } from './route
 import { Route as MarketingLibrarySiteAuditSeoAuditReportTemplateRouteImport } from './routes/_marketing/library/site-audit/seo-audit-report-template'
 import { Route as MarketingLibrarySiteAuditTechnicalSeoAuditChecklistRouteImport } from './routes/_marketing/library/site-audit/technical-seo-audit-checklist'
 
+const CampaignRoute = CampaignRouteImport.update({
+  id: '/_campaign',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MarketingRoute = MarketingRouteImport.update({
   id: '/_marketing',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AgentSetupDottxtRoute = AgentSetupDottxtRouteImport.update({
+  id: '/agent-setup.txt',
+  path: '/agent-setup.txt',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CampaignAgenciesRoute = CampaignAgenciesRouteImport.update({
+  id: '/agencies',
+  path: '/agencies',
+  getParentRoute: () => CampaignRoute,
+} as any)
+const CampaignAgentsRoute = CampaignAgentsRouteImport.update({
+  id: '/agents',
+  path: '/agents',
+  getParentRoute: () => CampaignRoute,
 } as any)
 const MarketingIndexRoute = MarketingIndexRouteImport.update({
   id: '/',
@@ -262,6 +288,11 @@ const ApiKeywordGeneratorRoute = ApiKeywordGeneratorRouteImport.update({
   path: '/api/keyword-generator',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPrivacyRegionRoute = ApiPrivacyRegionRouteImport.update({
+  id: '/api/privacy-region',
+  path: '/api/privacy-region',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSpamScoreCheckerRoute = ApiSpamScoreCheckerRouteImport.update({
   id: '/api/spam-score-checker',
   path: '/api/spam-score-checker',
@@ -298,6 +329,11 @@ const DocsSplatRoute = DocsSplatRouteImport.update({
   path: '/docs/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DocsLlmsDottxtRoute = DocsLlmsDottxtRouteImport.update({
+  id: '/docs/llms.txt',
+  path: '/docs/llms.txt',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const GuidesIndexRoute = GuidesIndexRouteImport.update({
   id: '/guides/',
   path: '/guides/',
@@ -306,6 +342,11 @@ const GuidesIndexRoute = GuidesIndexRouteImport.update({
 const GuidesSplatRoute = GuidesSplatRouteImport.update({
   id: '/guides/$',
   path: '/guides/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JsMetaDotjsRoute = JsMetaDotjsRouteImport.update({
+  id: '/js/meta.js',
+  path: '/js/meta.js',
   getParentRoute: () => rootRouteImport,
 } as any)
 const JsScriptDotjsRoute = JsScriptDotjsRouteImport.update({
@@ -581,6 +622,9 @@ const MarketingLibrarySiteAuditTechnicalSeoAuditChecklistRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof MarketingIndexRoute
+  '/agent-setup.txt': typeof AgentSetupDottxtRoute
+  '/agencies': typeof CampaignAgenciesRoute
+  '/agents': typeof CampaignAgentsRoute
   '/about': typeof MarketingAboutRoute
   '/ahrefs-alternative': typeof MarketingAhrefsAlternativeRoute
   '/ahrefs-pricing': typeof MarketingAhrefsPricingRoute
@@ -610,12 +654,15 @@ export interface FileRoutesByFullPath {
   '/api/domain-age-checker': typeof ApiDomainAgeCheckerRoute
   '/api/event': typeof ApiEventRoute
   '/api/keyword-generator': typeof ApiKeywordGeneratorRoute
+  '/api/privacy-region': typeof ApiPrivacyRegionRoute
   '/api/spam-score-checker': typeof ApiSpamScoreCheckerRoute
   '/api/subscribe': typeof ApiSubscribeRoute
   '/api/website-traffic-checker': typeof ApiWebsiteTrafficCheckerRoute
   '/blogs/$': typeof BlogsSplatRoute
   '/docs/$': typeof DocsSplatRoute
+  '/docs/llms.txt': typeof DocsLlmsDottxtRoute
   '/guides/$': typeof GuidesSplatRoute
+  '/js/meta.js': typeof JsMetaDotjsRoute
   '/js/script.js': typeof JsScriptDotjsRoute
   '/blogs/': typeof BlogsIndexRoute
   '/docs/': typeof DocsIndexRoute
@@ -666,6 +713,10 @@ export interface FileRoutesByFullPath {
   '/library/site-audit/': typeof MarketingLibrarySiteAuditIndexRoute
 }
 export interface FileRoutesByTo {
+  '/': typeof MarketingIndexRoute
+  '/agent-setup.txt': typeof AgentSetupDottxtRoute
+  '/agencies': typeof CampaignAgenciesRoute
+  '/agents': typeof CampaignAgentsRoute
   '/about': typeof MarketingAboutRoute
   '/ahrefs-alternative': typeof MarketingAhrefsAlternativeRoute
   '/ahrefs-pricing': typeof MarketingAhrefsPricingRoute
@@ -695,14 +746,16 @@ export interface FileRoutesByTo {
   '/api/domain-age-checker': typeof ApiDomainAgeCheckerRoute
   '/api/event': typeof ApiEventRoute
   '/api/keyword-generator': typeof ApiKeywordGeneratorRoute
+  '/api/privacy-region': typeof ApiPrivacyRegionRoute
   '/api/spam-score-checker': typeof ApiSpamScoreCheckerRoute
   '/api/subscribe': typeof ApiSubscribeRoute
   '/api/website-traffic-checker': typeof ApiWebsiteTrafficCheckerRoute
   '/blogs/$': typeof BlogsSplatRoute
   '/docs/$': typeof DocsSplatRoute
+  '/docs/llms.txt': typeof DocsLlmsDottxtRoute
   '/guides/$': typeof GuidesSplatRoute
+  '/js/meta.js': typeof JsMetaDotjsRoute
   '/js/script.js': typeof JsScriptDotjsRoute
-  '/': typeof MarketingIndexRoute
   '/blogs': typeof BlogsIndexRoute
   '/docs': typeof DocsIndexRoute
   '/guides': typeof GuidesIndexRoute
@@ -753,7 +806,11 @@ export interface FileRoutesByTo {
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
+  '/_campaign': typeof CampaignRouteWithChildren
   '/_marketing': typeof MarketingRouteWithChildren
+  '/agent-setup.txt': typeof AgentSetupDottxtRoute
+  '/_campaign/agencies': typeof CampaignAgenciesRoute
+  '/_campaign/agents': typeof CampaignAgentsRoute
   '/_marketing/about': typeof MarketingAboutRoute
   '/_marketing/ahrefs-alternative': typeof MarketingAhrefsAlternativeRoute
   '/_marketing/ahrefs-pricing': typeof MarketingAhrefsPricingRoute
@@ -783,12 +840,15 @@ export interface FileRoutesById {
   '/api/domain-age-checker': typeof ApiDomainAgeCheckerRoute
   '/api/event': typeof ApiEventRoute
   '/api/keyword-generator': typeof ApiKeywordGeneratorRoute
+  '/api/privacy-region': typeof ApiPrivacyRegionRoute
   '/api/spam-score-checker': typeof ApiSpamScoreCheckerRoute
   '/api/subscribe': typeof ApiSubscribeRoute
   '/api/website-traffic-checker': typeof ApiWebsiteTrafficCheckerRoute
   '/blogs/$': typeof BlogsSplatRoute
   '/docs/$': typeof DocsSplatRoute
+  '/docs/llms.txt': typeof DocsLlmsDottxtRoute
   '/guides/$': typeof GuidesSplatRoute
+  '/js/meta.js': typeof JsMetaDotjsRoute
   '/js/script.js': typeof JsScriptDotjsRoute
   '/_marketing/': typeof MarketingIndexRoute
   '/blogs/': typeof BlogsIndexRoute
@@ -843,6 +903,9 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/agent-setup.txt'
+    | '/agencies'
+    | '/agents'
     | '/about'
     | '/ahrefs-alternative'
     | '/ahrefs-pricing'
@@ -872,12 +935,15 @@ export interface FileRouteTypes {
     | '/api/domain-age-checker'
     | '/api/event'
     | '/api/keyword-generator'
+    | '/api/privacy-region'
     | '/api/spam-score-checker'
     | '/api/subscribe'
     | '/api/website-traffic-checker'
     | '/blogs/$'
     | '/docs/$'
+    | '/docs/llms.txt'
     | '/guides/$'
+    | '/js/meta.js'
     | '/js/script.js'
     | '/blogs/'
     | '/docs/'
@@ -928,6 +994,10 @@ export interface FileRouteTypes {
     | '/library/site-audit/'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/'
+    | '/agent-setup.txt'
+    | '/agencies'
+    | '/agents'
     | '/about'
     | '/ahrefs-alternative'
     | '/ahrefs-pricing'
@@ -957,14 +1027,16 @@ export interface FileRouteTypes {
     | '/api/domain-age-checker'
     | '/api/event'
     | '/api/keyword-generator'
+    | '/api/privacy-region'
     | '/api/spam-score-checker'
     | '/api/subscribe'
     | '/api/website-traffic-checker'
     | '/blogs/$'
     | '/docs/$'
+    | '/docs/llms.txt'
     | '/guides/$'
+    | '/js/meta.js'
     | '/js/script.js'
-    | '/'
     | '/blogs'
     | '/docs'
     | '/guides'
@@ -1014,7 +1086,11 @@ export interface FileRouteTypes {
     | '/library/site-audit'
   id:
     | '__root__'
+    | '/_campaign'
     | '/_marketing'
+    | '/agent-setup.txt'
+    | '/_campaign/agencies'
+    | '/_campaign/agents'
     | '/_marketing/about'
     | '/_marketing/ahrefs-alternative'
     | '/_marketing/ahrefs-pricing'
@@ -1044,12 +1120,15 @@ export interface FileRouteTypes {
     | '/api/domain-age-checker'
     | '/api/event'
     | '/api/keyword-generator'
+    | '/api/privacy-region'
     | '/api/spam-score-checker'
     | '/api/subscribe'
     | '/api/website-traffic-checker'
     | '/blogs/$'
     | '/docs/$'
+    | '/docs/llms.txt'
     | '/guides/$'
+    | '/js/meta.js'
     | '/js/script.js'
     | '/_marketing/'
     | '/blogs/'
@@ -1102,19 +1181,24 @@ export interface FileRouteTypes {
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
+  CampaignRoute: typeof CampaignRouteWithChildren
   MarketingRoute: typeof MarketingRouteWithChildren
+  AgentSetupDottxtRoute: typeof AgentSetupDottxtRoute
   ApiBacklinkCheckRoute: typeof ApiBacklinkCheckRoute
   ApiCompetitorAnalysisRoute: typeof ApiCompetitorAnalysisRoute
   ApiCompetitorKeywordFinderRoute: typeof ApiCompetitorKeywordFinderRoute
   ApiDomainAgeCheckerRoute: typeof ApiDomainAgeCheckerRoute
   ApiEventRoute: typeof ApiEventRoute
   ApiKeywordGeneratorRoute: typeof ApiKeywordGeneratorRoute
+  ApiPrivacyRegionRoute: typeof ApiPrivacyRegionRoute
   ApiSpamScoreCheckerRoute: typeof ApiSpamScoreCheckerRoute
   ApiSubscribeRoute: typeof ApiSubscribeRoute
   ApiWebsiteTrafficCheckerRoute: typeof ApiWebsiteTrafficCheckerRoute
   BlogsSplatRoute: typeof BlogsSplatRoute
   DocsSplatRoute: typeof DocsSplatRoute
+  DocsLlmsDottxtRoute: typeof DocsLlmsDottxtRoute
   GuidesSplatRoute: typeof GuidesSplatRoute
+  JsMetaDotjsRoute: typeof JsMetaDotjsRoute
   JsScriptDotjsRoute: typeof JsScriptDotjsRoute
   BlogsIndexRoute: typeof BlogsIndexRoute
   DocsIndexRoute: typeof DocsIndexRoute
@@ -1123,12 +1207,40 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/_campaign': {
+      id: '/_campaign'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof CampaignRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_marketing': {
       id: '/_marketing'
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof MarketingRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/agent-setup.txt': {
+      id: '/agent-setup.txt'
+      path: '/agent-setup.txt'
+      fullPath: '/agent-setup.txt'
+      preLoaderRoute: typeof AgentSetupDottxtRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_campaign/agencies': {
+      id: '/_campaign/agencies'
+      path: '/agencies'
+      fullPath: '/agencies'
+      preLoaderRoute: typeof CampaignAgenciesRouteImport
+      parentRoute: typeof CampaignRoute
+    }
+    '/_campaign/agents': {
+      id: '/_campaign/agents'
+      path: '/agents'
+      fullPath: '/agents'
+      preLoaderRoute: typeof CampaignAgentsRouteImport
+      parentRoute: typeof CampaignRoute
     }
     '/_marketing/': {
       id: '/_marketing/'
@@ -1340,6 +1452,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiKeywordGeneratorRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/privacy-region': {
+      id: '/api/privacy-region'
+      path: '/api/privacy-region'
+      fullPath: '/api/privacy-region'
+      preLoaderRoute: typeof ApiPrivacyRegionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/spam-score-checker': {
       id: '/api/spam-score-checker'
       path: '/api/spam-score-checker'
@@ -1389,6 +1508,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DocsSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/docs/llms.txt': {
+      id: '/docs/llms.txt'
+      path: '/docs/llms.txt'
+      fullPath: '/docs/llms.txt'
+      preLoaderRoute: typeof DocsLlmsDottxtRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/guides/': {
       id: '/guides/'
       path: '/guides'
@@ -1401,6 +1527,13 @@ declare module '@tanstack/react-router' {
       path: '/guides/$'
       fullPath: '/guides/$'
       preLoaderRoute: typeof GuidesSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/js/meta.js': {
+      id: '/js/meta.js'
+      path: '/js/meta.js'
+      fullPath: '/js/meta.js'
+      preLoaderRoute: typeof JsMetaDotjsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/js/script.js': {
@@ -1721,6 +1854,20 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface CampaignRouteChildren {
+  CampaignAgenciesRoute: typeof CampaignAgenciesRoute
+  CampaignAgentsRoute: typeof CampaignAgentsRoute
+}
+
+const CampaignRouteChildren: CampaignRouteChildren = {
+  CampaignAgenciesRoute: CampaignAgenciesRoute,
+  CampaignAgentsRoute: CampaignAgentsRoute,
+}
+
+const CampaignRouteWithChildren = CampaignRoute._addFileChildren(
+  CampaignRouteChildren,
+)
+
 interface MarketingRouteChildren {
   MarketingAboutRoute: typeof MarketingAboutRoute
   MarketingAhrefsAlternativeRoute: typeof MarketingAhrefsAlternativeRoute
@@ -1899,19 +2046,24 @@ const MarketingRouteWithChildren = MarketingRoute._addFileChildren(
 )
 
 const rootRouteChildren: RootRouteChildren = {
+  CampaignRoute: CampaignRouteWithChildren,
   MarketingRoute: MarketingRouteWithChildren,
+  AgentSetupDottxtRoute: AgentSetupDottxtRoute,
   ApiBacklinkCheckRoute: ApiBacklinkCheckRoute,
   ApiCompetitorAnalysisRoute: ApiCompetitorAnalysisRoute,
   ApiCompetitorKeywordFinderRoute: ApiCompetitorKeywordFinderRoute,
   ApiDomainAgeCheckerRoute: ApiDomainAgeCheckerRoute,
   ApiEventRoute: ApiEventRoute,
   ApiKeywordGeneratorRoute: ApiKeywordGeneratorRoute,
+  ApiPrivacyRegionRoute: ApiPrivacyRegionRoute,
   ApiSpamScoreCheckerRoute: ApiSpamScoreCheckerRoute,
   ApiSubscribeRoute: ApiSubscribeRoute,
   ApiWebsiteTrafficCheckerRoute: ApiWebsiteTrafficCheckerRoute,
   BlogsSplatRoute: BlogsSplatRoute,
   DocsSplatRoute: DocsSplatRoute,
+  DocsLlmsDottxtRoute: DocsLlmsDottxtRoute,
   GuidesSplatRoute: GuidesSplatRoute,
+  JsMetaDotjsRoute: JsMetaDotjsRoute,
   JsScriptDotjsRoute: JsScriptDotjsRoute,
   BlogsIndexRoute: BlogsIndexRoute,
   DocsIndexRoute: DocsIndexRoute,

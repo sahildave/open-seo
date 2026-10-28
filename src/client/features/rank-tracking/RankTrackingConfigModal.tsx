@@ -394,15 +394,15 @@ function CostEstimate({
     <div className="space-y-0.5 rounded-lg bg-muted px-3 py-2.5 text-xs text-muted-foreground">
       <div>
         <span className="font-mono font-semibold text-foreground">
-          ~${costPerKeyword.toFixed(4)}
+          up to ${costPerKeyword.toFixed(4)}
         </span>{" "}
         per keyword per check
       </div>
       {schedule !== "manual" && (
         <div>
-          50 keywords would cost{" "}
+          50 keywords would cost up to{" "}
           <span className="font-mono font-semibold text-foreground">
-            ~${(costPerKeyword * 50 * checksPerMonth).toFixed(2)}
+            ${(costPerKeyword * 50 * checksPerMonth).toFixed(2)}
           </span>
           /month
         </div>

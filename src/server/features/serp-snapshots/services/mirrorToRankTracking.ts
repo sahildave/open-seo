@@ -7,23 +7,26 @@ export async function mirrorToRankTracking(
   project: { id: string; domain: string | null },
   snapshots: SerpSnapshot[],
 ) {
-  const result = { configsTouched: 0, runsWritten: 0, snapshotsSkipped: 0 };
+  const result = { configsTouched: 0, runsWritten: 0 };
   const domain = project.domain;
   if (!domain) return result;
 
-  const locations = new Map<number, SerpSnapshot[]>();
+  const markets = new Map<string, SerpSnapshot[]>();
   for (const snapshot of snapshots) {
-    const group = locations.get(snapshot.locationCode) ?? [];
+    const key = `${snapshot.locationCode}:${snapshot.languageCode}`;
+    const group = markets.get(key) ?? [];
     group.push(snapshot);
-    locations.set(snapshot.locationCode, group);
+    markets.set(key, group);
   }
 
-  for (const [locationCode, captures] of locations) {
+  for (const captures of markets.values()) {
+    const { locationCode, languageCode } = captures[0];
     const lookup = () =>
-      RankTrackingRepository.getConfigByProjectDomainLocation(
+      RankTrackingRepository.getConfigByProjectDomainMarket(
         project.id,
         domain,
         locationCode,
+        languageCode,
         null,
       );
     let config = await lookup();
@@ -34,7 +37,7 @@ export async function mirrorToRankTracking(
           projectId: project.id,
           domain,
           locationCode,
-          languageCode: captures[0].languageCode,
+          languageCode,
           locationName: null,
           devices: captures[0].device,
           serpDepth: 10,
@@ -49,29 +52,22 @@ export async function mirrorToRankTracking(
     }
     if (!config) throw new Error("Rank tracking config was not created");
 
-    // The existing unique key has no language column. Never mix a different
-    // language into this config's history; keep those captures in SERP storage.
-    const matching = captures.filter(
-      (s) => s.languageCode === config.languageCode,
-    );
-    result.snapshotsSkipped += captures.length - matching.length;
-    if (!matching.length) continue;
-    const devices = new Set(matching.map((s) => s.device));
+    const devices = new Set(captures.map((s) => s.device));
     devices.add(config.devices === "both" ? "desktop" : config.devices);
     if (config.devices === "both") devices.add("mobile");
     const deepestPosition = Math.max(
       config.serpDepth,
       10,
-      ...matching.flatMap((s) => s.organic.map((r) => r.position)),
+      ...captures.flatMap((s) => s.organic.map((r) => r.position)),
     );
     // Config forms and paid-check inputs accept depths in steps of ten.
     const serpDepth = Math.ceil(deepestPosition / 10) * 10;
     await RankTrackingRepository.updateConfig(config.id, project.id, {
-      devices: devices.size === 2 ? "both" : matching[0].device,
+      devices: devices.size === 2 ? "both" : captures[0].device,
       serpDepth,
     });
     await RankTrackingRepository.addKeywordsToConfig(
-      [...new Set(matching.map((s) => s.keyword.trim().toLowerCase()))].map(
+      [...new Set(captures.map((s) => s.keyword.trim().toLowerCase()))].map(
         (keyword) => ({
           id: crypto.randomUUID(),
           configId: config.id,
@@ -84,7 +80,7 @@ export async function mirrorToRankTracking(
     );
     const keywordIds = new Map(keywords.map((k) => [k.keyword, k.id]));
     const days = new Map<string, SerpSnapshot[]>();
-    for (const capture of matching) {
+    for (const capture of captures) {
       const day = capture.collectedAt.slice(0, 10);
       const group = days.get(day) ?? [];
       group.push(capture);

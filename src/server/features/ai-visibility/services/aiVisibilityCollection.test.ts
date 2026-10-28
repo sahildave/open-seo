@@ -1,5 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { aiObservations, projectCompetitors } from "@/db/schema";
+import { DataforseoChargedTaskError } from "@/server/lib/dataforseo/envelope";
+import { AppError } from "@/server/lib/errors";
 import { AiVisibilityRepository as repo } from "../repositories/AiVisibilityRepository";
 import {
   collectAiLiveBatch,
@@ -24,6 +26,9 @@ const { testDb, dataforseo } = await vi.hoisted(async () => {
   };
 });
 vi.mock("cloudflare:workers", () => ({ env: { DATABASE_PROVIDER: "d1" } }));
+vi.mock("cloudflare:workflows", () => ({
+  NonRetryableError: class extends Error {},
+}));
 vi.mock("@/db", () => ({ db: testDb.db }));
 vi.mock("@/db/runBatch", () => ({ runBatch: testDb.runBatch }));
 vi.mock("@/server/lib/runtime-env", () => ({
@@ -46,6 +51,27 @@ vi.mock("@/server/lib/dataforseo/llm-models", () => ({
 
 const runId = "run";
 const market = { locationCode: 2840, languageCode: "en" };
+const pendingTask = {
+  tag: "answer-0",
+  taskId: "task",
+  engine: "chatgpt",
+  prompt: "Which SEO tools?",
+  attempts: 1,
+} as const;
+const liveAnswer = {
+  status: "fulfilled",
+  value: { status: "completed", result: { markdown: "OpenSEO", sources: [] } },
+} as const;
+const providerFailure = {
+  status: "failed",
+  message: "Internal Server Error.",
+  code: "UPSTREAM_UNAVAILABLE",
+  retryable: true,
+} as const;
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 beforeEach(async () => {
   await testDb.seedProject();
@@ -97,11 +123,9 @@ describe("AI answer collection", () => {
       },
     });
 
-    const pending = await collectAiRound(runId, [
-      { tag: "answer-0", taskId: "task", engine: "chatgpt" },
-    ]);
+    const round = await collectAiRound(runId, [pendingTask], true);
 
-    expect(pending).toEqual([]);
+    expect(round).toEqual({ pending: [], retry: [] });
     expect(await repo.getObservation("answer-0")).toMatchObject({
       status: "completed",
     });
@@ -127,6 +151,9 @@ describe("AI answer collection", () => {
         }),
       ]),
     );
+    // A retried step skips the answer an earlier attempt already saved.
+    await collectAiRound(runId, [pendingTask], true);
+    expect(dataforseo.fetchTaskResult).toHaveBeenCalledTimes(1);
   });
 
   it("fails the answers DataForSEO did not accept and collects the rest", async () => {
@@ -142,11 +169,51 @@ describe("AI answer collection", () => {
       ],
     });
 
-    expect(pending).toEqual([
-      { tag: "answer-0", taskId: "task", engine: "chatgpt" },
+    expect(pending).toEqual([pendingTask]);
+    expect(await repo.getObservation("answer-1")).toMatchObject({
+      status: "failed",
+    });
+  });
+
+  it("counts the attempt of an answer posted again, so its retries stop at 3", async () => {
+    dataforseo.trackingTaskPost.mockResolvedValue([
+      { tag: "answer-0", taskId: "task" },
+    ]);
+
+    const pending = await postAiBatch(runId, customer, market, {
+      engine: "chatgpt",
+      tasks: [{ tag: "answer-0", prompt: "Which SEO tools?", attempts: 2 }],
+    });
+
+    expect(pending).toEqual([{ ...pendingTask, attempts: 3 }]);
+  });
+
+  it("returns a queued answer DataForSEO's backend failed for a new post, and fails it after the last attempt", async () => {
+    dataforseo.fetchTaskResult.mockResolvedValue(providerFailure);
+
+    const round = await collectAiRound(
+      runId,
+      [
+        pendingTask,
+        {
+          ...pendingTask,
+          tag: "answer-1",
+          prompt: "Best rank tracker?",
+          attempts: 3,
+        },
+      ],
+      true,
+    );
+
+    expect(round.retry).toEqual([
+      {
+        engine: "chatgpt",
+        tasks: [{ tag: "answer-0", prompt: "Which SEO tools?", attempts: 1 }],
+      },
     ]);
     expect(await repo.getObservation("answer-1")).toMatchObject({
       status: "failed",
+      error: "UPSTREAM_UNAVAILABLE",
     });
   });
 
@@ -222,7 +289,43 @@ describe("AI answer collection", () => {
     ]);
     expect(await repo.getObservation("answer-1")).toMatchObject({
       status: "failed",
-      error: "Timed out",
+      error: "INTERNAL_ERROR",
+    });
+  });
+
+  it("asks a model answer again only when DataForSEO returned the failed task", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    dataforseo.llmResponse.mockImplementation(
+      async ({ userPrompt }: { userPrompt: string }) => {
+        if (userPrompt === "Best rank tracker?")
+          throw new AppError("UPSTREAM_UNAVAILABLE", "DataForSEO HTTP 502");
+        throw new DataforseoChargedTaskError(
+          "Internal Server Error.",
+          { path: [], costUsd: 0 },
+          false,
+          "UPSTREAM_UNAVAILABLE",
+        );
+      },
+    );
+
+    const collecting = collectAiModelBatch(runId, customer, market, {
+      engine: "claude",
+      tasks: [
+        { tag: "answer-0", prompt: "Which SEO tools?" },
+        { tag: "answer-1", prompt: "Best rank tracker?" },
+      ],
+    });
+    await vi.runAllTimersAsync();
+    await collecting;
+
+    expect(dataforseo.llmResponse).toHaveBeenCalledTimes(4);
+    expect(await repo.getObservation("answer-0")).toMatchObject({
+      status: "failed",
+      error: "UPSTREAM_UNAVAILABLE",
+    });
+    expect(await repo.getObservation("answer-1")).toMatchObject({
+      status: "failed",
+      error: "UPSTREAM_UNAVAILABLE",
     });
   });
 
@@ -236,7 +339,7 @@ describe("AI answer collection", () => {
       branded: false,
     });
 
-    const plan = await prepareAiRun(runId, customer);
+    const plan = await prepareAiRun(runId);
 
     expect(plan.modelBatches).toMatchObject([
       { engine: "claude", tasks: [{ tag: "answer-claude" }] },
@@ -247,15 +350,9 @@ describe("AI answer collection", () => {
   });
 
   it("collects a manual run live, saving answers and failing rejected calls", async () => {
-    expect(await prepareAiRun(runId, customer)).toMatchObject({ live: true });
+    expect(await prepareAiRun(runId)).toMatchObject({ live: true });
     dataforseo.trackingLiveBatch.mockResolvedValue([
-      {
-        status: "fulfilled",
-        value: {
-          status: "completed",
-          result: { markdown: "OpenSEO", sources: [] },
-        },
-      },
+      liveAnswer,
       { status: "rejected", reason: new Error("Timed out") },
     ]);
 
@@ -269,19 +366,38 @@ describe("AI answer collection", () => {
     });
     expect(await repo.getObservation("answer-1")).toMatchObject({
       status: "failed",
-      error: "Timed out",
+      error: "INTERNAL_ERROR",
+    });
+    expect(dataforseo.trackingLiveBatch).toHaveBeenCalledOnce();
+  });
+
+  it("asks a live answer again when DataForSEO's backend fails it, up to 3 attempts", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const failed = { status: "fulfilled", value: providerFailure };
+    dataforseo.trackingLiveBatch
+      .mockResolvedValueOnce([failed, failed])
+      .mockResolvedValueOnce([liveAnswer, failed])
+      .mockResolvedValueOnce([failed]);
+
+    const collecting = collectAiLiveBatch(runId, customer, market, [
+      { tag: "answer-0", prompt: "Which SEO tools?", engine: "chatgpt" },
+      { tag: "answer-1", prompt: "Best rank tracker?", engine: "chatgpt" },
+    ]);
+    await vi.runAllTimersAsync();
+    await collecting;
+
+    expect(dataforseo.trackingLiveBatch).toHaveBeenCalledTimes(3);
+    expect(await repo.getObservation("answer-0")).toMatchObject({
+      status: "completed",
+    });
+    expect(await repo.getObservation("answer-1")).toMatchObject({
+      status: "failed",
+      error: "UPSTREAM_UNAVAILABLE",
     });
   });
 
   it("saves the rest of a paid live batch when one answer cannot be saved", async () => {
-    const answer = {
-      status: "fulfilled",
-      value: {
-        status: "completed",
-        result: { markdown: "OpenSEO", sources: [] },
-      },
-    };
-    dataforseo.trackingLiveBatch.mockResolvedValue([answer, answer]);
+    dataforseo.trackingLiveBatch.mockResolvedValue([liveAnswer, liveAnswer]);
     vi.spyOn(repo, "persistAnswer").mockRejectedValueOnce(new Error("D1"));
     vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -299,13 +415,8 @@ describe("AI answer collection", () => {
   });
 
   it("fails answers that never arrived and finishes the run as partial", async () => {
-    dataforseo.fetchTaskResult.mockResolvedValue({
-      status: "completed",
-      result: { markdown: "OpenSEO", sources: [] },
-    });
-    await collectAiRound(runId, [
-      { tag: "answer-0", taskId: "task", engine: "chatgpt" },
-    ]);
+    dataforseo.fetchTaskResult.mockResolvedValue(liveAnswer.value);
+    await collectAiRound(runId, [pendingTask], true);
 
     await finalizeAiRun(runId);
 
@@ -316,5 +427,16 @@ describe("AI answer collection", () => {
       status: "failed",
       error: "No answer arrived within the collection window.",
     });
+  });
+
+  it("tells the tracker the check could not collect answers when none arrived", async () => {
+    await finalizeAiRun(runId);
+
+    expect(await repo.getRunInternal(runId)).toMatchObject({
+      status: "failed",
+    });
+    expect((await repo.getTracker("project"))?.lastSkipReason).toBe(
+      "The last check could not collect answers.",
+    );
   });
 });

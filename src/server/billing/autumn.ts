@@ -53,6 +53,16 @@ export const autumn = {
       loadAutumn().then((client) => client.customers.getOrCreate(...args)),
     get: (...args: Parameters<Autumn["customers"]["get"]>) =>
       loadAutumn().then((client) => client.customers.get(...args)),
+    update: (...args: Parameters<Autumn["customers"]["update"]>) =>
+      loadAutumn().then((client) => client.customers.update(...args)),
+  },
+  events: {
+    aggregate: (...args: Parameters<Autumn["events"]["aggregate"]>) =>
+      loadAutumn().then((client) => client.events.aggregate(...args)),
+  },
+  invoices: {
+    list: (...args: Parameters<Autumn["invoices"]["list"]>) =>
+      loadAutumn().then((client) => client.invoices.list(...args)),
   },
   balances: {
     // Confirms or releases a hold taken by `check({ lock })`. Not in the

@@ -1,14 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { revalidateLogic } from "@tanstack/react-form";
-import { ArrowRight } from "lucide-react";
+import { cn } from "cn";
+import { ArrowRight, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { useAppForm } from "@/client/components/form/useAppForm";
 import { QueryError } from "@/client/components/QueryState";
 import { Spinner } from "@/client/components/Spinner";
 import { Button } from "@/client/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/client/components/ui/collapsible";
+import { Spinner as SpinnerIcon } from "@/client/components/ui/spinner";
 import { WizardFooter } from "@/client/features/onboarding/WizardFooter";
-import { toastInitialAudit } from "@/client/features/projects/initialAuditToast";
 import { ProjectMarketFields } from "@/client/features/projects/ProjectMarketFields";
 import { projectsQueryOptions } from "@/client/features/projects/projectQueries";
 import type { ProjectSummary } from "@/client/features/projects/types";
@@ -17,19 +23,21 @@ import {
   getStandardErrorMessage,
 } from "@/client/lib/error-messages";
 import { captureClientEvent } from "@/client/lib/posthog";
-import { updateProject } from "@/serverFunctions/projects";
+import { saveOnboardingWebsite } from "@/serverFunctions/projects";
 
 /**
  * First onboarding step: save the website and country on the user's first
- * project. Saving a new website starts its first site audit server-side, so
- * the dashboard has results by the time the user reaches it.
+ * project. Saving a new website starts its first site audit in the background,
+ * so the dashboard has results by the time the user reaches it.
  */
 export function WebsiteOnboardingStep({
   onNext,
   onSkip,
+  suggestedDomain,
 }: {
   onNext: () => void;
   onSkip: () => void;
+  suggestedDomain?: string;
 }) {
   const projectsQuery = useQuery(projectsQueryOptions());
   const project = projectsQuery.data?.[0];
@@ -48,6 +56,7 @@ export function WebsiteOnboardingStep({
         <WebsiteForm
           key={project.id}
           project={project}
+          suggestedDomain={suggestedDomain}
           onNext={onNext}
           onSkip={onSkip}
         />
@@ -72,43 +81,40 @@ const websiteSchema = z.object({
 
 function WebsiteForm({
   project,
+  suggestedDomain,
   onNext,
   onSkip,
 }: {
   project: ProjectSummary;
+  suggestedDomain?: string;
   onNext: () => void;
   onSkip: () => void;
 }) {
   const queryClient = useQueryClient();
   const saveMutation = useMutation({
     mutationFn: (values: z.infer<typeof websiteSchema>) =>
-      updateProject({
+      saveOnboardingWebsite({
         data: {
           projectId: project.id,
-          // Name the auto-created project after the site it now tracks.
-          name:
-            project.name === "Default" ? values.domain.trim() : project.name,
           domain: values.domain.trim(),
           ...values.market,
         },
       }),
     // The form shows the domain error inline and toasts the rest itself.
     meta: { errorToast: false },
-    onSuccess: async (saved) => {
-      await queryClient.invalidateQueries({
-        queryKey: projectsQueryOptions().queryKey,
-      });
-      captureClientEvent("onboarding:website_saved", {
-        audit_status: saved.initialAudit?.status ?? "existing",
-      });
-      toastInitialAudit(saved.initialAudit);
+    onSuccess: (saved) => {
+      // Move on without refetching: the save returned the project as stored.
+      queryClient.setQueryData(projectsQueryOptions().queryKey, (projects) =>
+        projects?.map((p) => (p.id === saved.id ? saved : p)),
+      );
+      captureClientEvent("onboarding:website_saved");
       onNext();
     },
   });
 
   const form = useAppForm({
     defaultValues: {
-      domain: project.domain ?? "",
+      domain: project.domain ?? suggestedDomain ?? "",
       // New projects default to the United States.
       market: {
         locationCode: project.locationCode,
@@ -121,7 +127,11 @@ function WebsiteForm({
       try {
         await saveMutation.mutateAsync(value);
       } catch (error) {
-        if (getErrorCode(error) === "VALIDATION_ERROR")
+        const errorCode = getErrorCode(error);
+        captureClientEvent("onboarding:website_save_failed", {
+          error_code: errorCode ?? "UNKNOWN",
+        });
+        if (errorCode === "VALIDATION_ERROR")
           formApi.setErrorMap({
             onSubmit: {
               fields: { domain: "Enter a valid domain, like acme.com." },
@@ -144,14 +154,22 @@ function WebsiteForm({
             />
           )}
         </form.AppField>
-        <form.Field name="market">
-          {(field) => (
-            <ProjectMarketFields
-              value={field.state.value}
-              onChange={field.handleChange}
-            />
-          )}
-        </form.Field>
+        <Collapsible>
+          <CollapsibleTrigger className="group flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+            <ChevronDown className="size-4 transition-transform group-data-panel-open:rotate-180" />
+            Choose default country &amp; language
+          </CollapsibleTrigger>
+          <CollapsibleContent keepMounted className="pt-4">
+            <form.Field name="market">
+              {(field) => (
+                <ProjectMarketFields
+                  value={field.state.value}
+                  onChange={field.handleChange}
+                />
+              )}
+            </form.Field>
+          </CollapsibleContent>
+        </Collapsible>
         <WizardFooter
           className="mt-4"
           onSkip={onSkip}
@@ -166,10 +184,22 @@ function WebsiteForm({
               {({ empty, submitting }) => (
                 <Button
                   type="submit"
-                  className="font-semibold disabled:bg-foreground/10 disabled:text-foreground/20 disabled:opacity-100"
+                  className="relative font-semibold disabled:bg-foreground/10 disabled:text-foreground/20 disabled:opacity-100"
                   disabled={empty || submitting}
+                  aria-busy={submitting || undefined}
                 >
-                  Save and continue <ArrowRight className="size-4" />
+                  {/* Hidden, not removed, so the button keeps its width. */}
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1.5",
+                      submitting && "invisible",
+                    )}
+                  >
+                    Save and continue <ArrowRight className="size-4" />
+                  </span>
+                  {submitting ? (
+                    <SpinnerIcon className="absolute inset-0 m-auto text-muted-foreground" />
+                  ) : null}
                 </Button>
               )}
             </form.Subscribe>

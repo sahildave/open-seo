@@ -25,11 +25,13 @@ const mocks = vi.hoisted(() => ({
   captureServerEvent: vi.fn(),
   setShareToken: vi.fn(),
   isHostedServerAuthMode: vi.fn(),
+  usesBetterAuthServer: vi.fn(),
 }));
 
 vi.mock("cloudflare:workers", () => ({ env: {} }));
 vi.mock("@/server/lib/runtime-env", () => ({
   isHostedServerAuthMode: mocks.isHostedServerAuthMode,
+  usesBetterAuthServer: mocks.usesBetterAuthServer,
 }));
 vi.mock("@/server/features/projects/services/ProjectService", () => ({
   ProjectService: {
@@ -72,6 +74,7 @@ const storedReport = (
 
 beforeEach(() => {
   mocks.isHostedServerAuthMode.mockResolvedValue(true);
+  mocks.usesBetterAuthServer.mockResolvedValue(true);
   mocks.setShareToken.mockResolvedValue(true);
   mocks.getProjectForOrganization.mockResolvedValue({ id: projectId });
   mocks.countReports.mockResolvedValue(3);
@@ -181,7 +184,10 @@ describe("list_reports", () => {
 describe("get_report", () => {
   it("returns the summary without the document, and the document on request", async () => {
     mocks.getReport.mockResolvedValue(storedReport());
-    mocks.getReportWithHtml.mockResolvedValue({ ...storedReport(), html });
+    mocks.getReportWithHtml.mockResolvedValue({
+      ...storedReport({ sizeBytes: new TextEncoder().encode(html).length }),
+      html,
+    });
 
     const metadataOnly = await getReportTool.handler(
       { projectId, reportId },
@@ -190,12 +196,19 @@ describe("get_report", () => {
     expect(mocks.getReportWithHtml).not.toHaveBeenCalled();
     expect(textContent(metadataOnly)).not.toContain(html);
     expect(metadataOnly.structuredContent.report.shareUrl).toBeNull();
+    expect(metadataOnly.structuredContent.report).not.toHaveProperty("html");
 
     const withHtml = await getReportTool.handler(
       { projectId, reportId, includeHtml: true },
       toolContext,
     );
     expect(textContent(withHtml)).toContain(html);
+    // Clients that render structuredContent never see the text block, so the
+    // document has to reach them here too, whole: the tool tells agents to
+    // compare what they received against htmlBytes.
+    const { html: returned, htmlBytes } = withHtml.structuredContent.report;
+    expect(returned).toBe(html);
+    expect(new TextEncoder().encode(returned).length).toBe(htmlBytes);
   });
 });
 
@@ -306,6 +319,7 @@ describe("public report sharing", () => {
 
   it("hides unusable share URLs on self-hosted deployments but permits revocation", async () => {
     mocks.isHostedServerAuthMode.mockResolvedValue(false);
+    mocks.usesBetterAuthServer.mockResolvedValue(false);
     mocks.getReport.mockResolvedValue(
       storedReport({ shareToken: "a".repeat(32) }),
     );

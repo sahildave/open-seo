@@ -29,6 +29,16 @@ beforeAll(async () => {
   client = createClient({ url: "file::memory:" });
   testDb = drizzle(client);
   vi.doMock("@/db", () => ({ db: testDb }));
+  // Run batched writes one by one against the same in-memory database.
+  vi.doMock("@/db/runBatch", () => ({
+    DB_BATCH_SIZE: 100,
+    executeInBatches: async <T>(
+      items: T[],
+      build: (tx: typeof testDb, item: T) => Promise<unknown>,
+    ) => {
+      for (const item of items) await build(testDb, item);
+    },
+  }));
 
   await client.executeMultiple(`
     CREATE TABLE projects (
@@ -67,6 +77,28 @@ beforeAll(async () => {
       pinned_at TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE rank_check_runs (
+      id TEXT PRIMARY KEY,
+      config_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      keywords_total INTEGER NOT NULL DEFAULT 0,
+      is_subset_run INTEGER NOT NULL DEFAULT 0,
+      started_at TEXT NOT NULL
+    );
+    CREATE TABLE rank_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id TEXT NOT NULL,
+      tracking_keyword_id TEXT NOT NULL,
+      keyword TEXT NOT NULL,
+      device TEXT NOT NULL,
+      position INTEGER,
+      url TEXT,
+      serp_features TEXT,
+      checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX rank_snapshots_run_keyword_device_idx
+      ON rank_snapshots (run_id, tracking_keyword_id, device);
   `);
 
   ({ RankTrackingRepository } = await import("./RankTrackingRepository"));
@@ -78,6 +110,8 @@ afterAll(() => {
 
 beforeEach(async () => {
   await client.executeMultiple(`
+    DELETE FROM rank_snapshots;
+    DELETE FROM rank_check_runs;
     DELETE FROM rank_tracking_keywords;
     DELETE FROM rank_tracking_configs;
     DELETE FROM projects;
@@ -311,5 +345,108 @@ describe("setKeywordsPinned", () => {
 
     await RankTrackingRepository.setKeywordsPinned(["kw1"], "cfg_a", false);
     expect(await pinnedIds()).toEqual([]);
+  });
+});
+
+function daysAgo(days: number) {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 19)
+    .replace("T", " ");
+}
+
+describe("getConfigTrend", () => {
+  it("keeps every row of a run inside the range and drops a run that started before it", async () => {
+    // run_b started before the 30-day cutoff, but one snapshot is after it.
+    for (const [runId, startedAt, snapshotTimes] of [
+      ["run_a", daysAgo(10), [daysAgo(10), daysAgo(10)]],
+      ["run_b", daysAgo(30.01), [daysAgo(30.01), daysAgo(29.99)]],
+    ] as const) {
+      await client.execute({
+        sql: "INSERT INTO rank_check_runs (id, config_id, project_id, status, keywords_total, started_at) VALUES (?, 'cfg_a', 'proj_1', 'completed', 2, ?)",
+        args: [runId, startedAt],
+      });
+      for (const [index, checkedAt] of snapshotTimes.entries()) {
+        await client.execute({
+          sql: "INSERT INTO rank_snapshots (run_id, tracking_keyword_id, keyword, device, position, checked_at) VALUES (?, ?, 'kw', 'desktop', 5, ?)",
+          args: [runId, `kw${index}`, checkedAt],
+        });
+      }
+    }
+
+    const trend = await RankTrackingRepository.getConfigTrend(
+      "cfg_a",
+      "desktop",
+      30,
+    );
+
+    expect(trend).toMatchObject([
+      { runId: "run_a", keywordsTotal: 2, total: 2 },
+    ]);
+  });
+});
+
+async function seedRun(id: string, status: string) {
+  await client.execute({
+    sql: "INSERT INTO rank_check_runs (id, config_id, project_id, status, started_at) VALUES (?, 'cfg_a', 'proj_1', ?, ?)",
+    args: [id, status, NOW],
+  });
+}
+
+function snapshotRow(
+  runId: string,
+  trackingKeywordId: string,
+  device: "desktop" | "mobile",
+  position: number | null,
+) {
+  return { runId, trackingKeywordId, keyword: "kw", device, position };
+}
+
+describe("retry snapshot queries", () => {
+  it("finds each keyword's best position on any device from completed runs only", async () => {
+    await seedRun("run_done", "completed");
+    await seedRun("run_active", "running");
+    await RankTrackingRepository.insertSnapshots([
+      snapshotRow("run_done", "kw_ranked", "desktop", null),
+      snapshotRow("run_done", "kw_ranked", "mobile", 4),
+      snapshotRow("run_done", "kw_never", "desktop", null),
+      snapshotRow("run_active", "kw_never", "mobile", 1),
+    ]);
+
+    const best =
+      await RankTrackingRepository.getBestPositionsForKeywords("cfg_a");
+
+    expect(best).toEqual(
+      expect.arrayContaining([
+        { trackingKeywordId: "kw_never", position: null },
+        { trackingKeywordId: "kw_ranked", position: 4 },
+      ]),
+    );
+  });
+
+  it("upserts a retry's result over the saved one, and keeps it through miss cleanup", async () => {
+    await seedRun("run_a", "running");
+    await RankTrackingRepository.insertSnapshots([
+      snapshotRow("run_a", "kw_0", "desktop", null),
+    ]);
+
+    await RankTrackingRepository.upsertSnapshots([
+      snapshotRow("run_a", "kw_0", "desktop", 2),
+      snapshotRow("run_a", "kw_1", "desktop", 7),
+    ]);
+
+    // Cleanup of unconfirmed misses never removes a row that holds a position.
+    await RankTrackingRepository.deleteNotFoundSnapshots([
+      { runId: "run_a", trackingKeywordId: "kw_0", device: "desktop" },
+    ]);
+
+    const rows = await RankTrackingRepository.getSnapshotsForRun("run_a");
+    expect(rows).toHaveLength(2);
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ trackingKeywordId: "kw_0", position: 2 }),
+        expect.objectContaining({ trackingKeywordId: "kw_1", position: 7 }),
+      ]),
+    );
   });
 });

@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- all site-audit MCP tools are intentionally kept in one module */
 import { sort } from "remeda";
 import { z } from "zod";
 import { AuditRepository } from "@/server/features/audit/repositories/AuditRepository";
@@ -13,13 +14,19 @@ import { PAGE_FETCH_CLASSES } from "@/shared/audit-fetch-class";
 import { mcpResponse } from "@/server/mcp/formatters";
 import { buildProjectMeta } from "@/server/mcp/context";
 import {
+  formatMcpCell,
+  formatMcpTable,
+  type McpTableColumn,
+  truncatedCell,
+} from "@/server/mcp/table";
+import {
   looseObjectOutputSchema,
   optionalMetaOutputSchema,
 } from "@/server/mcp/output-schemas";
 import { withMcpProjectAuth } from "@/server/mcp/project-auth";
 import { projectIdSchema } from "@/server/mcp/schemas";
 import { renderingEstimateText } from "@/shared/audit-rendering";
-import { RENDERED_MAX_AUDIT_PAGES } from "@/shared/audit-limits";
+import { RENDERED_CRAWL_TIME_LIMIT_HOURS } from "@/shared/audit-limits";
 
 const auditIdSchema = z
   .string()
@@ -61,7 +68,7 @@ const runInputSchema = {
     .boolean()
     .optional()
     .describe(
-      `Render JavaScript before auditing, for sites whose content or links load client-side or whose bot protection blocks the plain crawler. Slower, and limited to ${RENDERED_MAX_AUDIT_PAGES.toLocaleString("en-US")} pages. On hosted plans: ${renderingEstimateText(100)} Billing counts pages actually rendered. Hosted plans hold the high end until the audit ends; an account that cannot cover it is refused. Default false.`,
+      `Render JavaScript before auditing, for sites whose content or links load client-side or whose bot protection blocks the plain crawler. Slower. On hosted plans, for 100 pages: ${renderingEstimateText(100)} Hosted plans hold that amount until the audit ends; an account that cannot cover it is refused. A hosted rendered crawl stops after ${RENDERED_CRAWL_TIME_LIMIT_HOURS} hours. Default false.`,
     ),
   runLighthouse: z
     .boolean()
@@ -211,7 +218,7 @@ export const getAuditStatusTool = {
           ? ` The audit stopped early but kept results for the ${status.pagesCrawled} pages it crawled — call get_audit_issues for the partial issue report.`
           : "";
     return mcpResponse({
-      text: `Audit ${status.id} (${status.startUrl}): ${status.status} — phase ${status.currentPhase}, ${status.pagesCrawled}/${status.pagesTotal} pages${lighthouseNote}.${nextStep}`,
+      text: `Audit ${status.id} (${status.startUrl}): ${status.status}${status.errorCode ? ` (${status.errorCode})` : ""} — phase ${status.currentPhase}, ${status.pagesCrawled}/${status.pagesTotal} pages${lighthouseNote}.${nextStep}`,
       meta: buildProjectMeta(
         context,
         args.projectId,
@@ -223,6 +230,28 @@ export const getAuditStatusTool = {
 };
 
 // ─── get_audit_issues ────────────────────────────────────────────────────────
+
+// Text-only clients read just the text block, so each issue type renders its
+// remediation steps plus a bounded sample of affected URLs. Every URL of every
+// type would be a data dump; the per-type count keeps the sample honest.
+const ISSUE_SAMPLE_SIZE = 5;
+
+/** Render an issue's parsed details record as ` (statusCode: 404, length: 12)`. */
+function formatIssueDetails(details: unknown): string {
+  if (typeof details !== "object" || details === null || Array.isArray(details))
+    return "";
+  const parts = Object.entries(details)
+    .filter(([, value]) => value !== null && value !== undefined)
+    .map(
+      ([key, value]) =>
+        `${key}: ${
+          Array.isArray(value)
+            ? value.map(formatMcpCell).join(" → ")
+            : formatMcpCell(value)
+        }`,
+    );
+  return parts.length > 0 ? ` (${parts.join(", ")})` : "";
+}
 
 const issuesInputSchema = {
   projectId: projectIdSchema,
@@ -316,20 +345,58 @@ export const getAuditIssuesTool = {
       };
     });
 
+    // Sample affected URLs from the returned rows, keyed by issue type; counts
+    // still come from `summary`, which covers every matching row.
+    const samples = new Map<string, typeof issues>();
+    for (const issue of issues) {
+      const sample = samples.get(issue.issueType) ?? [];
+      if (sample.length < ISSUE_SAMPLE_SIZE) sample.push(issue);
+      samples.set(issue.issueType, sample);
+    }
+    let sampled = false;
+
+    const sections = summary.map((entry) => {
+      const shown = samples.get(entry.issueType) ?? [];
+      const remaining = entry.count - shown.length;
+      if (remaining > 0) sampled = true;
+      const howToFix = getIssueDescriptor(entry.issueType)?.howToFix;
+      return [
+        `[${entry.severity}] ${entry.title} (${entry.issueType}): ${entry.count} affected page${entry.count === 1 ? "" : "s"}`,
+        howToFix ? `  Fix: ${howToFix}` : null,
+        ...shown.map(
+          (issue) => `  - ${issue.url}${formatIssueDetails(issue.details)}`,
+        ),
+        // A low-severity type can fall entirely outside the limit-truncated
+        // rows, leaving counts with no rows to sample from.
+        shown.length === 0
+          ? `  (no sample URLs within the first ${limit} issue rows — raise limit to see examples)`
+          : remaining > 0
+            ? `  …and ${remaining} more affected URL${remaining === 1 ? "" : "s"} in this issue.`
+            : null,
+      ]
+        .filter((line) => line !== null)
+        .join("\n");
+    });
+
     const text =
       rows.length === 0
         ? args.severity || args.issueType
           ? `No issues found for audit ${audit.id} matching the given filters.`
-          : `No issues recorded for audit ${audit.id}. Note: audits run before issue checks existed have no issue data — re-run the audit with run_site_audit to get a real report.`
+          : audit.status === "running"
+            ? `Audit ${audit.id} is still running; issues are recorded when it finishes. Poll get_audit_status.`
+            : `Audit ${audit.id} found no issues across ${audit.pagesCrawled} crawled page${audit.pagesCrawled === 1 ? "" : "s"}.`
         : [
-            `Audit ${audit.id} (${audit.startUrl}): ${rows.length} issues${rows.length > limit ? ` (showing ${limit})` : ""}.`,
-            "By type:",
-            ...summary.map(
-              (entry) =>
-                `- [${entry.severity}] ${entry.title} (${entry.issueType}): ${entry.count}`,
-            ),
-            "Full issue rows with how_to_fix instructions are in structuredContent.issues.",
-          ].join("\n");
+            `Audit ${audit.id} (${audit.startUrl}): ${rows.length} issues across ${summary.length} issue type${summary.length === 1 ? "" : "s"}.`,
+            ...sections,
+            sampled
+              ? `Up to ${ISSUE_SAMPLE_SIZE} affected URLs are listed per issue type — open the audit in the dashboard for the full list.`
+              : null,
+            rows.length > limit
+              ? `Structured issue rows are capped at the ${limit} highest-severity issues; raise limit (max 1000) for more.`
+              : null,
+          ]
+            .filter((block) => block !== null)
+            .join("\n\n");
 
     return mcpResponse({
       text,
@@ -374,6 +441,29 @@ const pagesInputSchema = {
 
 type PagesArgs = z.infer<z.ZodObject<typeof pagesInputSchema>>;
 
+type AuditPageRow = Awaited<
+  ReturnType<typeof AuditRepository.getPagesForAudit>
+>[number];
+
+const PAGE_COLUMNS: McpTableColumn<AuditPageRow>[] = [
+  { header: "url", value: (page) => page.url },
+  { header: "status", value: (page) => page.statusCode },
+  { header: "fetch", value: (page) => page.fetchClass },
+  { header: "title", value: (page) => page.title, format: truncatedCell(70) },
+  {
+    header: "description",
+    value: (page) => page.metaDescription,
+    format: truncatedCell(90),
+  },
+  { header: "words", value: (page) => page.wordCount },
+  { header: "indexable", value: (page) => page.isIndexable },
+  { header: "depth", value: (page) => page.crawlDepth },
+  { header: "in sitemap", value: (page) => page.inSitemap },
+  { header: "internal links", value: (page) => page.internalLinkCount },
+  { header: "ms", value: (page) => page.responseTimeMs },
+  { header: "redirect", value: (page) => page.redirectUrl },
+];
+
 export const getAuditPagesTool = {
   name: "get_audit_pages",
   config: {
@@ -408,16 +498,11 @@ export const getAuditPagesTool = {
     const limit = args.limit ?? 100;
     const pages = filtered.slice(0, limit);
 
-    const text = [
-      `Audit ${audit.id}: ${filtered.length} pages${filtered.length > limit ? ` (showing ${limit})` : ""}.`,
-      ...pages
-        .slice(0, 25)
-        .map(
-          (page) =>
-            `- ${page.statusCode} ${page.url}${page.fetchClass !== "ok" ? ` [${page.fetchClass}]` : ""}  "${page.title ?? ""}"`,
-        ),
-      "Full rows are in structuredContent.pages.",
-    ].join("\n");
+    const header = `Audit ${audit.id}: ${filtered.length} page${filtered.length === 1 ? "" : "s"}${filtered.length > limit ? ` (showing ${limit}; raise limit (max 1000) or narrow with urlContains/fetchClass/statusCode for the rest)` : ""}.`;
+    const text =
+      pages.length === 0
+        ? `${header}\nNo crawled pages match these filters.`
+        : `${header}\n${formatMcpTable(pages, PAGE_COLUMNS)}`;
 
     return mcpResponse({
       text,

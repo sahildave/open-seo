@@ -10,13 +10,13 @@ import {
   getRankPositionMatrix,
   estimateRankCheckCost,
 } from "@/serverFunctions/rank-tracking";
-import { AlertTriangle } from "lucide-react";
 import { QueryState } from "@/client/components/QueryState";
 import { SkeletonCard } from "@/client/components/SkeletonPresets";
-import { Alert, AlertDescription } from "@/client/components/ui/alert";
 import { useHostedPlanGate } from "@/client/features/billing/HostedPlanGate";
 import { captureClientEvent } from "@/client/lib/posthog";
 import { FreePlanAlert } from "./FreePlanAlert";
+import { RankTrackingChangesAlert } from "./RankTrackingChangesAlert";
+import { RankRunAlerts } from "./RankRunAlerts";
 import { RankTrackingDetailHeader } from "./RankTrackingDetailHeader";
 import { RankTrackingOverview } from "./RankTrackingOverview";
 import { RankTrackingTable } from "./RankTrackingTable";
@@ -234,36 +234,9 @@ export function RankTrackingDomainDetail({
 
   return (
     <div className="space-y-3">
-      {config.lastSkipReason === "insufficient_credits" && (
-        <Alert variant="warning">
-          <AlertTriangle />
-          <AlertDescription className="text-foreground">
-            Last scheduled check was skipped due to insufficient credits. Top up
-            your balance to resume automatic tracking.
-          </AlertDescription>
-        </Alert>
-      )}
+      <RankTrackingChangesAlert />
 
-      {latestRun?.maybeStale && (
-        <Alert variant="warning">
-          <AlertTriangle />
-          <AlertDescription className="text-foreground">
-            This run may be unresponsive and will be cleaned up automatically.
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {latestRun?.status === "failed" && (
-        <Alert variant="destructive">
-          <AlertTriangle />
-          <AlertDescription className="text-foreground">
-            <p>
-              <span className="font-medium">Last check failed.</span>{" "}
-              {latestRun.errorMessage}
-            </p>
-          </AlertDescription>
-        </Alert>
-      )}
+      <RankRunAlerts run={latestRun} />
 
       <FreePlanAlert visible={planStatus === "free"} />
 

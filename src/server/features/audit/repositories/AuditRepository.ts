@@ -48,6 +48,18 @@ async function createAudit(data: {
   });
 }
 
+/** Records where the crawl really starts, once the workflow has probed the site. */
+async function updateAuditStart(
+  auditId: string,
+  startUrl: string,
+  config: AuditConfig,
+) {
+  await db
+    .update(audits)
+    .set({ startUrl, config: JSON.stringify(config) })
+    .where(eq(audits.id, auditId));
+}
+
 async function updateAuditProgress(
   auditId: string,
   workflowInstanceId: string,
@@ -352,14 +364,6 @@ async function getAuditResultsForProject(auditId: string, projectId: string) {
   const [pages, lighthouse, issues] = await Promise.all([
     db.query.auditPages.findMany({
       where: eq(auditPages.auditId, auditId),
-      // The results UI never reads these per-page JSON blobs, and on a
-      // 10k-page audit images alone run to ~12 MB — enough to push this
-      // request past the Worker's 128 MB memory limit.
-      columns: {
-        imagesJson: false,
-        headingOrderJson: false,
-        hreflangTagsJson: false,
-      },
     }),
     db.query.auditLighthouseResults.findMany({
       where: eq(auditLighthouseResults.auditId, auditId),
@@ -415,6 +419,7 @@ async function deleteAuditForProject(auditId: string, projectId: string) {
 
 export const AuditRepository = {
   createAudit,
+  updateAuditStart,
   updateAuditProgress,
   completeAudit,
   failAudit,

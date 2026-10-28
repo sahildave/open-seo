@@ -48,7 +48,8 @@ beforeAll(async () => {
         "0029_location_name.sql",
         "0045_slimy_master_chief.sql",
         "0051_rank_keyword_pins.sql",
-        "0055_serp_snapshots.sql",
+        "0059_thankful_aaron_stack.sql",
+        "0063_serp_snapshots.sql",
       ].flatMap((file) =>
         readFileSync(`drizzle/sqlite/${file}`, "utf8").split(
           "--> statement-breakpoint",
@@ -121,7 +122,6 @@ describe("ingest", () => {
     expect(mirror).toEqual({
       configsTouched: 1,
       runsWritten: 2,
-      snapshotsSkipped: 0,
     });
     const [config] = await RankTrackingRepository.getConfigsForProject(
       project.id,
@@ -260,7 +260,7 @@ describe("ingest", () => {
     ]);
   });
 
-  it("keeps captures without a domain or in another language out of the rank history", async () => {
+  it("skips mirroring without a domain and separates languages into their own configs", async () => {
     expect(
       (
         await SerpSnapshotService.ingest({ ...project, domain: null }, [
@@ -272,14 +272,18 @@ describe("ingest", () => {
       snapshot({ languageCode: "fr" }),
     ]);
     expect(mirror).toEqual({
-      configsTouched: 1,
-      runsWritten: 1,
-      snapshotsSkipped: 1,
+      configsTouched: 2,
+      runsWritten: 2,
     });
+    expect(
+      (await RankTrackingRepository.getConfigsForProject(project.id)).map(
+        (c) => c.languageCode,
+      ),
+    ).toEqual(expect.arrayContaining(["en", "fr"]));
     expect(
       (await client.execute("SELECT count(*) AS total FROM rank_snapshots"))
         .rows[0].total,
-    ).toBe(1);
+    ).toBe(2);
     expect(
       (await client.execute("SELECT count(*) AS total FROM serp_snapshots"))
         .rows[0].total,

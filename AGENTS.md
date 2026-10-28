@@ -3,6 +3,7 @@
 ## Engineering principles
 
 - Prefer simple, readable, flat code with minimal indirection.
+- Work on bugs a real user hit or would plausibly hit. Don't open a ticket or PR for an edge case found only by reading the code; flag it instead. Security holes and significant billing abuse are the exception.
 - Search for existing implementations and installed libraries before creating new helpers or abstractions.
 - Abstract when it prevents meaningful drift and makes the result simpler to maintain. Avoid speculative or one-use abstraction layers.
 - Keep product data normalized and relationships explicit. Do not encode relational data in JSON or text merely to avoid joins.
@@ -13,6 +14,16 @@
 - Prefer idiomatic TanStack Query, Router, and Form patterns for server state, routing, and submitted forms.
 - shadcn components in `src/client/components/ui/` are built on Base UI, not Radix. Compose them with the `render` prop, not `asChild`.
 - Specs under `docs/maintainers/specs/` are public design records: what a feature does, how it works, the alternatives considered and why they lost. No line numbers, migration mechanics, test plans, incidents, costs, or internal infrastructure details.
+
+## Every App
+
+OpenSEO also runs behind an Every App Gateway (`AUTH_MODE=everyapp`; how it works is in `docs/maintainers/every-app.md`).
+
+- Before running everyapp, read the everyapp skill. It lives in the platform checkout beside this repository, `../private-every-app/packages/cli/skills/everyapp/SKILL.md`; `everyapp create` copies it into new apps, and this port reads it from there.
+- Run the app with `pnpm dev:everyapp` (everyapp dev): both Workers behind a local gateway with a seeded dev user. The keys it needs locally go in `.dev.vars`, written by hand.
+- Deploy only through the Every App CLI: `pnpm everyapp install https://github.com/every-app/open-seo` from an Every App checkout (the npm CLI installed here cannot deploy). Never run `cf deploy` or `wrangler deploy` for this mode. `deploy:selfhost` is the other self-hosting path (`pnpm deploy` is the plain `wrangler deploy` of `wrangler.jsonc`) and `deploy:postgres` is app.openseo.so's production deploy; none of them is this one.
+- Declare resources (D1, KV, Durable Objects, Workflows, the audit Worker) and settings (`providers`, `capabilities`, `secrets`, each with its need and `why`) in `everyapp.config.ts`; `cloudflare.config.ts` builds the Workers from it.
+- The Gateway signs people in: read identity only through the SDK (`src/middleware/ensure-user/everyApp.ts`), never from a client-supplied header or cookie, and treat every route listed under `public` in `everyapp.config.ts` as open to the internet.
 
 ## Testing
 
@@ -43,7 +54,7 @@
 - `docs/` (except `docs/maintainers/`) and `web/content/docs/` are public, user-facing documentation. Write only material that helps users understand, use, or self-host the product.
 - Do not put internal working notes, content briefs, drafts, asset-sourcing notes, implementation logs, or agent handoffs in those directories.
 - Use `docs/maintainers/` for engineering decisions, development workflows, and maintenance notes that should be shared and versioned. This directory is tracked in Git but is not part of the user-facing documentation site. Create notes only when requested or useful for future maintenance; never include secrets.
-- Keep PR review and validation details in the PR description. Continue using the dedicated papercut log for repository friction.
+- Write PR descriptions in the `simple-issue-description` format, with no validation logs or per-file changelog. Continue using the dedicated papercut log for repository friction.
 
 ## Log papercuts
 

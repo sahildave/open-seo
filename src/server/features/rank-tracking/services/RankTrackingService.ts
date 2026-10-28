@@ -22,11 +22,10 @@ import {
 } from "./rankCheckRunGuards";
 import {
   estimateRankCheckCredits,
-  computeNextCheckAt,
-  isScheduledRankTrackingInterval,
   MAX_CONFIGS_PER_PROJECT,
   rankCheckCostApprovalError,
 } from "@/shared/rank-tracking";
+import { resolveNextCheckAt } from "./configSchedule";
 import {
   getIsoCountryCode,
   resolveKeywordDataLanguage,
@@ -72,14 +71,14 @@ async function createConfig(input: {
     });
   }
 
-  const existing =
-    await RankTrackingRepository.getConfigByProjectDomainLocation(
-      input.projectId,
-      normalizedDomain,
-      locationCode,
-      locationName,
-    );
-  // The (project, domain, location) row still exists when a domain is
+  const existing = await RankTrackingRepository.getConfigByProjectDomainMarket(
+    input.projectId,
+    normalizedDomain,
+    locationCode,
+    languageCode,
+    locationName,
+  );
+  // The (project, domain, location, language) row still exists when a domain is
   // archived — archiving only flips isActive to false. So re-adding an
   // archived domain reactivates that row (keeping its keyword/ranking
   // history) with the freshly chosen settings, rather than colliding with
@@ -88,8 +87,8 @@ async function createConfig(input: {
     throw new AppError(
       "VALIDATION_ERROR",
       locationName
-        ? "This domain + city combination is already being tracked"
-        : "This domain + country combination is already being tracked",
+        ? "This domain + city + language combination is already being tracked"
+        : "This domain + country + language combination is already being tracked",
     );
   }
 
@@ -108,7 +107,6 @@ async function createConfig(input: {
   if (existing) {
     await RankTrackingRepository.updateConfig(existing.id, input.projectId, {
       isActive: true,
-      languageCode,
       devices: input.devices ?? "both",
       serpDepth: input.serpDepth,
       scheduleInterval,
@@ -211,33 +209,6 @@ async function updateConfig(
   }
 
   await RankTrackingRepository.updateConfig(configId, projectId, updates);
-}
-
-function resolveNextCheckAt(
-  scheduleInterval: RankTrackingConfig["scheduleInterval"],
-  scheduleTime: RankCheckScheduleTime | undefined,
-): string | null {
-  if (isScheduledRankTrackingInterval(scheduleInterval)) {
-    // Without one the check would quietly repeat on whatever day today is.
-    if (
-      scheduleInterval === "weekly" &&
-      scheduleTime &&
-      scheduleTime.weekday === undefined
-    ) {
-      throw new AppError(
-        "VALIDATION_ERROR",
-        "A weekly schedule time needs a weekday",
-      );
-    }
-    return computeNextCheckAt(scheduleInterval, null, scheduleTime);
-  }
-  if (scheduleTime) {
-    throw new AppError(
-      "VALIDATION_ERROR",
-      "A schedule time needs a daily, weekly, or monthly schedule",
-    );
-  }
-  return null;
 }
 
 // ---------------------------------------------------------------------------
