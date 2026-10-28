@@ -115,6 +115,7 @@ export async function mirrorToRankTracking(
       group.push(capture);
       days.set(day, group);
     }
+    let newestCompletedAt: Date | null = null;
     for (const [day, collected] of days) {
       const runId = `serp-${config.id}-${day}`;
       const latest = new Map<string, SerpSnapshot>();
@@ -161,6 +162,21 @@ export async function mirrorToRankTracking(
         }),
       );
       result.runsWritten++;
+      const completedAt = new Date(collected[collected.length - 1].collectedAt);
+      if (!newestCompletedAt || completedAt > newestCompletedAt) {
+        newestCompletedAt = completedAt;
+      }
+    }
+    // A backfill of older days must never move last checked backwards.
+    if (
+      newestCompletedAt &&
+      (!config.lastCheckedAt ||
+        newestCompletedAt > new Date(config.lastCheckedAt))
+    ) {
+      // Same ISO format RankCheckWorkflow writes for lastCheckedAt.
+      await RankTrackingRepository.updateConfig(config.id, project.id, {
+        lastCheckedAt: newestCompletedAt.toISOString(),
+      });
     }
     result.configsTouched++;
   }

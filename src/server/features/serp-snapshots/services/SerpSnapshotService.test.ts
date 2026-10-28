@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- one real-SQL spec covers ingest and its rank-tracking mirror */
 import { sort } from "remeda";
 import { readdirSync, readFileSync } from "node:fs";
 import {
@@ -280,6 +281,28 @@ describe("ingest", () => {
     ).toEqual([
       { started_at: "2026-10-01 10:00:00" },
       { started_at: "2026-10-02 19:30:00" },
+    ]);
+  });
+
+  it("sets last checked to the newest run and never moves it backwards", async () => {
+    const lastCheckedAt = async () =>
+      (
+        await client.execute(
+          "SELECT last_checked_at FROM rank_tracking_configs",
+        )
+      ).rows;
+    await SerpSnapshotService.ingest(project, [
+      snapshot({}),
+      snapshot({ collectedAt: "2026-10-02T08:30:00.000Z" }),
+    ]);
+    expect(await lastCheckedAt()).toEqual([
+      { last_checked_at: "2026-10-02T08:30:00.000Z" },
+    ]);
+    await SerpSnapshotService.ingest(project, [
+      snapshot({ collectedAt: "2026-10-01T12:00:00.000Z" }),
+    ]);
+    expect(await lastCheckedAt()).toEqual([
+      { last_checked_at: "2026-10-02T08:30:00.000Z" },
     ]);
   });
 
