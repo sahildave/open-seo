@@ -4,7 +4,10 @@ import { AppError } from "@/server/lib/errors";
 import { validateTeamDomain } from "@/shared/selfhost-checks";
 import { classifyAccessVerificationError } from "./accessTokenErrors";
 import { ensureSharedWorkspaceOrganization } from "@/server/auth/delegated-organization";
-import { resolveSharedWorkspaceContext } from "./delegated";
+import {
+  resolveSharedWorkspaceContext,
+  resolveSharedWorkspaceOwnerContext,
+} from "./delegated";
 import type { EnsuredUserContext } from "./types";
 
 const jwksByTeamDomain = new Map<
@@ -108,6 +111,24 @@ export async function resolveCloudflareAccessContext(
   return resolveAccessUser(await verifyAccessToken(headers));
 }
 
+export async function resolveCloudflareAccessMcpContext(
+  headers: Headers,
+): Promise<EnsuredUserContext> {
+  const payload = await verifyAccessToken(headers);
+  if (isServiceToken(payload)) {
+    return resolveSharedWorkspaceOwnerContext();
+  }
+  return resolveAccessUser(payload);
+}
+
+function isServiceToken(payload: JWTPayload) {
+  return (
+    !payload.sub &&
+    typeof payload.common_name === "string" &&
+    payload.common_name.length > 0
+  );
+}
+
 // For machine callers of raw API routes (e.g. a collector pushing data): an
 // Access service token's JWT carries `common_name` (the token's client ID) and
 // no user identity. Such a caller has no user row, so it gets the shared
@@ -117,11 +138,7 @@ export async function resolveCloudflareAccessOrganizationId(
   headers: Headers,
 ): Promise<string> {
   const payload = await verifyAccessToken(headers);
-  const isServiceToken =
-    !payload.sub &&
-    typeof payload.common_name === "string" &&
-    payload.common_name.length > 0;
-  if (isServiceToken) {
+  if (isServiceToken(payload)) {
     return ensureSharedWorkspaceOrganization();
   }
   return (await resolveAccessUser(payload)).organizationId;
