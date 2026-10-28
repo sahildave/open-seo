@@ -1,5 +1,6 @@
-import { safeHostname } from "@/shared/safe-url";
+import { findOurResult } from "./serpSnapshotPosition";
 import type { SerpSnapshotInput } from "@/types/schemas/serpSnapshots";
+import { mirrorToRankTracking } from "./mirrorToRankTracking";
 import {
   SerpSnapshotRepository,
   type SerpSnapshotRow,
@@ -13,27 +14,6 @@ type SnapshotProject = {
 };
 
 type OrganicResult = SerpSnapshotInput["organic"][number];
-
-function bareHost(value: string) {
-  const withProtocol = /^[a-z][a-z\d+.-]*:\/\//i.test(value)
-    ? value
-    : `https://${value}`;
-  return safeHostname(withProtocol.trim().toLowerCase());
-}
-
-// Best organic position of the project's domain (subdomains count), or null
-// when the project has no domain or does not rank in the captured results.
-function findOurPosition(domain: string | null, organic: OrganicResult[]) {
-  const ours = domain ? bareHost(domain) : null;
-  if (!ours) return null;
-  const positions = organic
-    .filter((result) => {
-      const host = bareHost(result.url);
-      return host === ours || host?.endsWith(`.${ours}`);
-    })
-    .map((result) => result.position);
-  return positions.length > 0 ? Math.min(...positions) : null;
-}
 
 async function ingest(
   project: SnapshotProject,
@@ -54,15 +34,23 @@ async function ingest(
     related: JSON.stringify(snapshot.related),
     videos: JSON.stringify(snapshot.videos),
     aiOverview: JSON.stringify(snapshot.aiOverview),
-    ourPosition: findOurPosition(project.domain, snapshot.organic),
+    ourPosition:
+      findOurResult(project.domain, snapshot.organic)?.position ?? null,
   }));
   await SerpSnapshotRepository.insertMany(rows);
-  return rows.map((row) => ({
+  const mirror = await mirrorToRankTracking(
+    project,
+    project.domain
+      ? (await SerpSnapshotRepository.listForProject(project.id)).map(parseRow)
+      : [],
+  );
+  const inserted = rows.map((row) => ({
     id: row.id,
     keyword: row.keyword,
     collectedAt: row.collectedAt,
     ourPosition: row.ourPosition,
   }));
+  return { inserted, mirror };
 }
 
 function parseRow(row: SerpSnapshotRow) {
@@ -129,8 +117,6 @@ function diffSnapshots(current: SerpSnapshot, previous: SerpSnapshot) {
     ourPosition: { from: previous.ourPosition, to: current.ourPosition },
   };
 }
-
-export type SerpSnapshotDiff = ReturnType<typeof diffSnapshots>;
 
 async function list(params: {
   projectId: string;

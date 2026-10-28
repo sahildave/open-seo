@@ -34,6 +34,14 @@ async function listLatest(params: {
     .limit(params.limit);
 }
 
+async function listForProject(projectId: string) {
+  return db
+    .select()
+    .from(serpSnapshots)
+    .where(eq(serpSnapshots.projectId, projectId))
+    .orderBy(serpSnapshots.collectedAt, serpSnapshots.id);
+}
+
 // The snapshot collected immediately before `row` for the same keyword,
 // device and market — the baseline a diff compares against.
 async function getPrevious(row: SerpSnapshotRow) {
@@ -57,6 +65,7 @@ async function getPrevious(row: SerpSnapshotRow) {
 
 export const SerpSnapshotRepository = {
   insertMany,
+  listForProject,
   listLatest,
   getPrevious,
 };

@@ -35,6 +35,7 @@ import {
   getLatestRunForConfig,
   getActiveRunForConfig,
   insertSnapshots,
+  upsertCollectedRun,
   getSnapshotsForRun,
 } from "./runQueries";
 
@@ -402,6 +403,7 @@ export const RankTrackingRepository = {
   getLatestRunForConfig,
   getActiveRunForConfig,
   insertSnapshots,
+  upsertCollectedRun,
   getSnapshotsForRun,
   getKeywordsForConfig,
   addKeywordsToConfig,

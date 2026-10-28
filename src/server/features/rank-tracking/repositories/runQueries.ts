@@ -1,8 +1,50 @@
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { InferInsertModel } from "drizzle-orm";
 import { db } from "@/db";
 import { rankCheckRuns, rankSnapshots } from "@/db/schema";
-import { executeInBatches } from "@/db/runBatch";
+import { executeInBatches, runBatch } from "@/db/runBatch";
+
+// One daily mirror is atomic: readers never see a completed run without its
+// positions. Each insert is a separate statement to respect D1's bind limit.
+export async function upsertCollectedRun(
+  run: InferInsertModel<typeof rankCheckRuns>,
+  snapshots: Omit<InferInsertModel<typeof rankSnapshots>, "id">[],
+) {
+  await runBatch((tx) => [
+    tx
+      .insert(rankCheckRuns)
+      .values(run)
+      .onConflictDoUpdate({
+        target: rankCheckRuns.id,
+        set: {
+          keywordsTotal: run.keywordsTotal,
+          keywordsChecked: run.keywordsChecked,
+          isSubsetRun: run.isSubsetRun,
+          startedAt: run.startedAt,
+          completedAt: run.completedAt,
+        },
+      }),
+    ...snapshots.map((snapshot) =>
+      tx
+        .insert(rankSnapshots)
+        .values(snapshot)
+        .onConflictDoUpdate({
+          target: [
+            rankSnapshots.runId,
+            rankSnapshots.trackingKeywordId,
+            rankSnapshots.device,
+          ],
+          set: {
+            position: snapshot.position,
+            url: snapshot.url,
+            serpFeatures: snapshot.serpFeatures,
+            checkedAt: snapshot.checkedAt,
+          },
+          setWhere: sql`${rankSnapshots.checkedAt} <= ${snapshot.checkedAt}`,
+        }),
+    ),
+  ]);
+}
 
 // ---------------------------------------------------------------------------
 // Run CRUD

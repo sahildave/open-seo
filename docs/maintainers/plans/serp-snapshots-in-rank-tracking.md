@@ -2,6 +2,19 @@
 
 Branch: `feat/serp-snapshots-rank-tracking` (cut from `main` at `59e1b890`).
 
+## Implementation status (2026-10-28)
+
+Implemented in `codex/serp-snapshots-rank-tracking`, based on this plan's commit. Deployment and live-data verification remain owner steps below.
+
+- HTTP and MCP ingest mirror stored captures into manual configs and completed daily runs. Both return `inserted` and `mirror` (`configsTouched`, `runsWritten`, `snapshotsSkipped`). Raw SERP captures remain append-only; the rank history mirror is idempotent.
+- Daily runs and their positions are written atomically. Later same-day captures update positions, URLs and features. Capture timestamps use the existing provider-specific rank-history format.
+- Captured depth rounds up to the next ten, matching the existing config form's validation (for example, position 15 requires depth 20).
+- The existing config unique key excludes language. The mirror retains the existing config's language (or the earliest capture's language when creating one), leaves other languages in SERP storage, and reports them in `snapshotsSkipped`.
+- The cache ingest script is included, with mirror-result printing. No schema migration, plugin version change, UI change or deployment was needed.
+- Real SQLite tests cover daily mappings, backfill, repeated ingest, newer captures and domain/language guards. Removing snapshot conflict handling made the idempotency test fail on the intended unique constraint; restoring it passed.
+
+Validation: the full suite passed (1,552 tests, one skipped). TypeScript, Knip, lint and plugin-skill sync passed. The root format check remains blocked by eight pre-existing Google SERP HTML/metadata fixture files; their raw contents were left unchanged. The new and changed files are formatted. Checks ran through the installed local binaries because pnpm could not fetch its pinned version in this environment. Snyk reported no findings in changed files; its 39 repository findings are outside this change.
+
 ## Goal
 
 The Rank tracking screen shows the positions that the browser collector already captures, so the hand-written "ranking ladder" HTML reports are no longer needed.
@@ -18,12 +31,12 @@ Today the collector (EgoLite on the owner's Mac) scrapes Google and pushes each 
 
 ## Mapping
 
-| Rank tracking | From `serp_snapshots` |
-|---|---|
-| `rank_tracking_configs` (get or create) | `project_id`, `domain = projects.domain`, `location_code`, `language_code`, `location_name = null`, `devices` = `desktop`, `mobile` or `both` from the devices seen, `serp_depth` = deepest organic position seen (at least 10), `schedule_interval = "manual"`. Reuse `getConfigByProjectDomainLocation` and `createConfig`. Widen `devices` if a new device appears. |
-| `rank_tracking_keywords` (upsert) | `keyword`, lowercased the same way `addKeywordsToConfig` does. Reuse that function. |
-| `rank_check_runs` | `id = serp-<configId>-<day>`, `status = "completed"`, `keywords_total` = `keywords_checked` = distinct keywords that day, `is_subset_run` = fewer than the config's keyword count, `started_at` = earliest `collected_at` that day, `completed_at` = latest. |
-| `rank_snapshots` | `run_id`, `tracking_keyword_id`, `keyword`, `device`, `position = our_position`, `url` = the URL of our best organic result (same host rule as `findOurPosition` in `SerpSnapshotService.ts`), `checked_at = collected_at`, `serp_features` = JSON array using DataForSEO's item type names (see `src/server/lib/dataforseo/serp.ts`): `organic` always, `people_also_ask` if `paa` is non-empty, `video` if `videos` is non-empty, `ai_overview` if `ai_overview.present`. Null when empty, matching `rankCheckPaths.ts`. |
+| Rank tracking                           | From `serp_snapshots`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rank_tracking_configs` (get or create) | `project_id`, `domain = projects.domain`, `location_code`, `language_code`, `location_name = null`, `devices` = `desktop`, `mobile` or `both` from the devices seen, `serp_depth` = deepest organic position seen (at least 10), `schedule_interval = "manual"`. Reuse `getConfigByProjectDomainLocation` and `createConfig`. Widen `devices` if a new device appears.                                                                                                                                                     |
+| `rank_tracking_keywords` (upsert)       | `keyword`, lowercased the same way `addKeywordsToConfig` does. Reuse that function.                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `rank_check_runs`                       | `id = serp-<configId>-<day>`, `status = "completed"`, `keywords_total` = `keywords_checked` = distinct keywords that day, `is_subset_run` = fewer than the config's keyword count, `started_at` = earliest `collected_at` that day, `completed_at` = latest.                                                                                                                                                                                                                                                               |
+| `rank_snapshots`                        | `run_id`, `tracking_keyword_id`, `keyword`, `device`, `position = our_position`, `url` = the URL of our best organic result (same host rule as `findOurPosition` in `SerpSnapshotService.ts`), `checked_at = collected_at`, `serp_features` = JSON array using DataForSEO's item type names (see `src/server/lib/dataforseo/serp.ts`): `organic` always, `people_also_ask` if `paa` is non-empty, `video` if `videos` is non-empty, `ai_overview` if `ai_overview.present`. Null when empty, matching `rankCheckPaths.ts`. |
 
 If two snapshots exist for the same keyword, device and day, keep the latest.
 

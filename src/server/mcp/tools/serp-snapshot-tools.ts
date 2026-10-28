@@ -37,6 +37,11 @@ export const ingestSerpSnapshotsTool = {
           ourPosition: z.number().nullable(),
         }),
       ),
+      mirror: z.looseObject({
+        configsTouched: z.number(),
+        runsWritten: z.number(),
+        snapshotsSkipped: z.number(),
+      }),
       ...optionalMetaOutputSchema,
     }),
     annotations: {
@@ -48,7 +53,7 @@ export const ingestSerpSnapshotsTool = {
   },
   handler: withMcpProjectAuth(
     async (args: z.infer<z.ZodObject<typeof ingestInputSchema>>, context) => {
-      const inserted = await SerpSnapshotService.ingest(
+      const { inserted, mirror } = await SerpSnapshotService.ingest(
         context.project,
         args.snapshots,
       );
@@ -60,9 +65,10 @@ export const ingestSerpSnapshotsTool = {
               (row) =>
                 `- ${row.keyword}  ours:${row.ourPosition ?? "not ranked"}`,
             )
-            .join("\n"),
+            .join("\n") +
+          `\nRank tracking: ${mirror.configsTouched} config(s), ${mirror.runsWritten} daily run(s), ${mirror.snapshotsSkipped} capture(s) skipped (different language).`,
         meta: buildProjectMeta(context, args.projectId),
-        structuredContent: { inserted },
+        structuredContent: { inserted, mirror },
       });
     },
   ),
