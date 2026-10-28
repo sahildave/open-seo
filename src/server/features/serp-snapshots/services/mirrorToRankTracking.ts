@@ -39,7 +39,6 @@ export async function mirrorToRankTracking(
         null,
       );
     let config = await lookup();
-    let created = false;
     if (!config) {
       try {
         await RankTrackingRepository.createConfig({
@@ -53,7 +52,6 @@ export async function mirrorToRankTracking(
           serpDepth: 10,
           scheduleInterval: "manual",
         });
-        created = true;
       } catch (error) {
         // A concurrent ingest can win the config's unique key. Re-read only
         // that key; unrelated database failures must still surface.
@@ -67,13 +65,18 @@ export async function mirrorToRankTracking(
       skippedMarkets.push({ locationCode, languageCode });
       continue;
     }
+    // A tracker can survive a failed first mirror. Persisted collected runs,
+    // rather than tracker creation in this request, decide whether to backfill.
+    const hasCollectedRuns = await RankTrackingRepository.hasCollectedRuns(
+      config.id,
+    );
     const rows = await SerpSnapshotRepository.listForMarket({
       projectId: project.id,
       locationCode,
       languageCode,
-      days: created
-        ? undefined
-        : [...new Set(incoming.map((s) => s.collectedAt.slice(0, 10)))],
+      days: hasCollectedRuns
+        ? [...new Set(incoming.map((s) => s.collectedAt.slice(0, 10)))]
+        : undefined,
     });
     const captures = rows.map((row) => ({
       ...parseSerpSnapshot(row),

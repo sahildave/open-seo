@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, like, sql } from "drizzle-orm";
 import type { InferInsertModel } from "drizzle-orm";
 import { db } from "@/db";
 import { rankCheckRuns, rankSnapshots } from "@/db/schema";
@@ -111,6 +111,20 @@ export async function getLatestRunForConfig(configId: string) {
     .orderBy(desc(rankCheckRuns.startedAt))
     .limit(1);
   return rows[0] ?? null;
+}
+
+export async function hasCollectedRuns(configId: string) {
+  const rows = await db
+    .select({ id: rankCheckRuns.id })
+    .from(rankCheckRuns)
+    .where(
+      and(
+        eq(rankCheckRuns.configId, configId),
+        like(rankCheckRuns.id, "serp-%"),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
 }
 
 /**

@@ -7,14 +7,14 @@ Branch: `feat/serp-snapshots-rank-tracking` (cut from `main` at `59e1b890`).
 Implemented in `codex/serp-snapshots-rank-tracking`, based on this plan's commit. Deployment and live-data verification remain owner steps below.
 
 - HTTP and MCP ingest mirror stored captures into manual configs and completed daily runs. Both return `inserted` and `mirror` (`configsTouched`, `runsWritten`, `skippedMarkets`). Raw SERP captures remain append-only; the rank history mirror is idempotent.
-- Markets with scheduled trackers are returned in `skippedMarkets` without changing those trackers. New manual trackers backfill their stored market history once; existing ones load and mirror only incoming UTC days.
+- Markets with scheduled trackers are returned in `skippedMarkets` without changing those trackers. Manual trackers without any persisted `serp-` runs backfill their stored market history, including on retry after a failed first mirror; trackers with collected runs load and mirror only incoming UTC days.
 - Daily runs and their positions are written atomically. Later same-day captures update positions, URLs and features. Capture timestamps use the existing provider-specific rank-history format.
 - Captured depth rounds up to the next ten, matching the existing config form's validation (for example, position 15 requires depth 20).
 - Trackers are grouped by location and language using main's existing market-aware unique key and lookup. Different languages have separate rank histories.
 - The cache ingest script is included, with mirror-result printing. No schema migration, plugin version change, UI change or deployment was needed.
 - Real SQLite tests cover daily mappings, backfill, repeated ingest, newer captures and domain/language guards. Removing snapshot conflict handling made the idempotency test fail on the intended unique constraint; restoring it passed.
 
-Validation after the review fixes: `pnpm run ci:check` passed and `pnpm run test:ci` passed all 1,826 tests. Removing either the manual-tracker guard or the incoming-day filter made its regression test fail; restoring both passed. The real failure output is in the PR description. Snyk reported no findings in changed files. No deployment or live-data verification was performed.
+Validation after the review fixes: `pnpm run ci:check` passed and `pnpm run test:ci` passed all 1,827 tests. Removing the manual-tracker guard, incoming-day filter, or persisted-run backfill decision made its regression test fail; restoring the fixes passed. The real failure output is in the PR description. Snyk reported no findings in changed files. No deployment or live-data verification was performed.
 
 ## Goal
 
@@ -25,7 +25,7 @@ Today the collector (EgoLite on the owner's Mac) scrapes Google and pushes each 
 ## Decisions (already made, do not reopen)
 
 1. **No schema migration.** Mirror snapshots into the existing rank tracking tables. Migrations under `drizzle/` are one-way doors and need a gate.
-2. **Backfill once, then mirror only incoming days.** When ingest creates a manual tracker, mirror all stored captures for that project and market once. For an existing manual tracker, load only the UTC collection days present in the incoming batch for that market, including captures from earlier pushes on those days so latest-wins stays correct. Keep writes idempotent; `runsWritten` counts only the days touched by this ingest. No separate backfill command.
+2. **Backfill from persisted run history, then mirror only incoming days.** When a manual tracker has no `serp-` runs yet, mirror all stored captures for that project and market, even if the tracker already exists after a failed first mirror. Once it has collected runs, load only the UTC collection days present in the incoming batch for that market, including captures from earlier pushes on those days so latest-wins stays correct. Keep writes idempotent; `runsWritten` counts only the days touched by this ingest. No separate backfill command.
 3. **One run per config per collection day (UTC).** The collector runs once a day per product, and one ladder equals one day. Run id is deterministic: `serp-<configId>-<YYYY-MM-DD>`. Insert runs and rank snapshots with on-conflict-do-nothing (or update counts for the run), so re-ingesting never duplicates.
 4. **Mirror only into manual trackers.** Create trackers with `scheduleInterval: "manual"` and reuse only manual trackers. If a market already has a non-manual tracker, leave its devices, depth and keywords unchanged and return that market in `skippedMarkets`. Do not create another tracker for the same market. The cron in `scheduledRankChecks.ts` excludes manual trackers.
 5. **The project's domain is the tracked domain.** If `projects.domain` is null, skip the mirror for that project. `serp_snapshots.our_position` is already computed against it.
@@ -44,7 +44,7 @@ If two snapshots exist for the same keyword, device and day, keep the latest.
 ## Where the code goes
 
 - `src/server/features/serp-snapshots/services/SerpSnapshotService.ts`: after `insertMany`, call a new `mirrorToRankTracking(project)`. Keep it in this service, or in a sibling file in the same feature folder if it is over ~80 lines. Follow AGENTS.md: service → repository, no new abstraction layers.
-- `src/server/features/serp-snapshots/repositories/SerpSnapshotRepository.ts`: add a market-scoped query, with optional UTC-day filtering in SQL. Load full market history only when creating its tracker.
+- `src/server/features/serp-snapshots/repositories/SerpSnapshotRepository.ts`: add a market-scoped query, with optional UTC-day filtering in SQL. Load full market history only while its tracker has no collected runs.
 - Rank tracking repositories: add an insert for a completed run plus its snapshots with on-conflict handling, if none exists. Must work on both D1 (SQLite) and Postgres. See `docs/maintainers/review-guidelines.md` on dual-dialect persistence.
 - Both ingest entry points already call `SerpSnapshotService.ingest`, so the HTTP route and the MCP tool get the mirror with no further changes. Do not add an MCP tool, so no plugin version bump is needed.
 - Return the mirror result from `ingest` (configs touched, runs written) so the ingest script can print it.
@@ -62,7 +62,7 @@ None expected. The rank tracking screen already renders configs, runs, history m
 
 ## Tests
 
-Follow AGENTS.md and the `test-audit` skill. Test through `SerpSnapshotService.ingest` with real SQL evaluation and all SQLite migrations applied in order. Keep one test per invariant: daily mapping, first-tracker backfill, idempotency, latest-wins across pushes, unchanged scheduled trackers with skipped-market reporting, and incoming-day-only mirroring. Config coverage, daily run metadata, missing domains and separate languages have their own tests.
+Follow AGENTS.md and the `test-audit` skill. Test through `SerpSnapshotService.ingest` with real SQL evaluation and all SQLite migrations applied in order. Keep one test per invariant: daily mapping, initial backfill and retry after a failed first mirror, idempotency, latest-wins across pushes, unchanged scheduled trackers with skipped-market reporting, and incoming-day-only mirroring. Config coverage, daily run metadata, missing domains and separate languages have their own tests.
 
 Demonstrate the scheduled-tracker guard and bounded-history query by removing each fix separately, showing its regression test fail, then restoring it. Keep the real failure output in the PR description.
 

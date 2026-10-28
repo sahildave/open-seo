@@ -154,6 +154,35 @@ describe("ingest", () => {
     ]);
   });
 
+  it("retries full backfill after the first mirror fails without writing a run", async () => {
+    vi.spyOn(
+      RankTrackingRepository,
+      "upsertCollectedRun",
+    ).mockRejectedValueOnce(new Error("mirror failed"));
+    await expect(
+      SerpSnapshotService.ingest(project, [
+        snapshot({}),
+        snapshot({ collectedAt: "2026-10-02T10:00:00Z" }),
+      ]),
+    ).rejects.toThrow("mirror failed");
+    const configs = await RankTrackingRepository.getConfigsForProject(
+      project.id,
+    );
+    expect(configs).toHaveLength(1);
+
+    await SerpSnapshotService.ingest(project, [
+      snapshot({ collectedAt: "2026-10-03T10:00:00Z" }),
+    ]);
+    const runs = await client.execute(
+      "SELECT id FROM rank_check_runs ORDER BY started_at",
+    );
+    expect(runs.rows).toEqual([
+      { id: `serp-${configs[0].id}-2026-10-01` },
+      { id: `serp-${configs[0].id}-2026-10-02` },
+      { id: `serp-${configs[0].id}-2026-10-03` },
+    ]);
+  });
+
   it("keeps rank history idempotent when the same batch is ingested again", async () => {
     const batch = [snapshot({})];
     await SerpSnapshotService.ingest(project, batch);
