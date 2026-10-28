@@ -6,6 +6,7 @@ import { RankTrackingKeywordService } from "@/server/features/rank-tracking/serv
 import { getLatestResults } from "@/server/features/rank-tracking/services/rankTrackingResults";
 import { AppError, asAppError } from "@/server/lib/errors";
 import { captureServerEvent } from "@/server/lib/posthog";
+import { markOnboardingMilestone } from "@/server/email/onboarding-drip";
 import { requireProjectContext } from "@/serverFunctions/middleware";
 import {
   getConfigsSchema,
@@ -37,6 +38,7 @@ interface RankConfigTrendPoint {
   top4to10: number;
   top11to20: number;
   notRanking: number;
+  notChecked: number;
 }
 
 export interface RankPositionMatrixCell {
@@ -96,6 +98,7 @@ export const createRankTrackingConfig = createServerFn({ method: "POST" })
       billingCustomer: context,
     });
 
+    await markOnboardingMilestone(context, "rankTrackingSetUp");
     waitUntil(
       captureServerEvent({
         distinctId: context.userId,
@@ -103,7 +106,6 @@ export const createRankTrackingConfig = createServerFn({ method: "POST" })
         organizationId: context.organizationId,
         properties: {
           project_id: context.projectId,
-          domain: data.domain,
           devices: data.devices ?? "both",
           schedule: data.scheduleInterval ?? "weekly",
         },
@@ -326,7 +328,9 @@ export const getRankConfigTrend = createServerFn({ method: "POST" })
       data.sinceDays,
     );
     // SQLite sum()/count() can return strings; coerce and derive "not ranking"
-    // (position > 20 or null) as the remainder so the buckets cover every kw.
+    // (position > 20 or null) as the remainder of the checked keywords, and
+    // "not checked" (the check failed, so no row) as the remainder of the
+    // run's keywords, so the buckets cover every tracked keyword.
     return rows.map((row) => {
       const top3 = Number(row.top3) || 0;
       const top4to10 = Number(row.top4to10) || 0;
@@ -339,6 +343,7 @@ export const getRankConfigTrend = createServerFn({ method: "POST" })
         top4to10,
         top11to20,
         notRanking: Math.max(0, total - top3 - top4to10 - top11to20),
+        notChecked: Math.max(0, row.keywordsTotal - total),
       };
     });
   });

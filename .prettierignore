@@ -20,3 +20,6 @@ web/
 # AFK runner output: run artefacts and the generated progress page
 .afk-runs/
 docs/progress.md
+
+# Saved Google results pages; parser tests need them byte-exact.
+fixtures/google-serp/

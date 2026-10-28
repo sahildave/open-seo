@@ -36,7 +36,7 @@ beforeAll(async () => {
     [
       `CREATE TABLE projects (id text PRIMARY KEY);`,
       `INSERT INTO projects (id) VALUES ('proj_1');`,
-      ...readFileSync("drizzle/sqlite/0055_serp_snapshots.sql", "utf8").split(
+      ...readFileSync("drizzle/sqlite/0063_serp_snapshots.sql", "utf8").split(
         "--> statement-breakpoint",
       ),
     ].join("\n"),

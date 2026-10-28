@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fff8ec78-d87a-40f9-9649-29650575face",
+  "id": "c72ff8c9-f504-4876-a543-7008dceee65d",
   "prevId": "54ee6137-3643-4309-976e-d1e6ed5357a5",
   "tables": {
     "backlink_snapshots": {
@@ -2543,13 +2543,6 @@
           "autoincrement": false,
           "default": 0
         },
-        "heading_order_json": {
-          "name": "heading_order_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "word_count": {
           "name": "word_count",
           "type": "integer",
@@ -2574,13 +2567,6 @@
           "autoincrement": false,
           "default": 0
         },
-        "images_json": {
-          "name": "images_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "internal_link_count": {
           "name": "internal_link_count",
           "type": "integer",
@@ -2604,13 +2590,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": false
-        },
-        "hreflang_tags_json": {
-          "name": "hreflang_tags_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         },
         "is_indexable": {
           "name": "is_indexable",
@@ -4850,146 +4829,6 @@
         "ai_trackers_project_id_projects_id_fk": {
           "name": "ai_trackers_project_id_projects_id_fk",
           "tableFrom": "ai_trackers",
-          "tableTo": "projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "serp_snapshots": {
-      "name": "serp_snapshots",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "keyword": {
-          "name": "keyword",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "location_code": {
-          "name": "location_code",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "language_code": {
-          "name": "language_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "device": {
-          "name": "device",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "collected_at": {
-          "name": "collected_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "organic": {
-          "name": "organic",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "paa": {
-          "name": "paa",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "related": {
-          "name": "related",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "videos": {
-          "name": "videos",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "ai_overview": {
-          "name": "ai_overview",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "our_position": {
-          "name": "our_position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
-        }
-      },
-      "indexes": {
-        "serp_snapshots_project_keyword_collected_idx": {
-          "name": "serp_snapshots_project_keyword_collected_idx",
-          "columns": [
-            "project_id",
-            "keyword",
-            "collected_at"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "serp_snapshots_project_id_projects_id_fk": {
-          "name": "serp_snapshots_project_id_projects_id_fk",
-          "tableFrom": "serp_snapshots",
           "tableTo": "projects",
           "columnsFrom": [
             "project_id"

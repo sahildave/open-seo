@@ -5,13 +5,14 @@ import { Button } from "@/client/components/ui/button";
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
 import { useState } from "react";
 import { AuthPageCard, AuthPageShell } from "@/client/features/auth/AuthPage";
+import { clearLastProjectId } from "@/client/lib/active-project";
 import { captureClientEvent } from "@/client/lib/posthog";
 import { authClient, signOutAndRedirect, useSession } from "@/lib/auth-client";
-import { isHostedClientAuthMode } from "@/lib/auth-mode";
+import { usesBetterAuthClient } from "@/lib/auth-mode";
 
 export const Route = createFileRoute("/accept-invitation/$id")({
   beforeLoad: () => {
-    if (!isHostedClientAuthMode()) {
+    if (!usesBetterAuthClient()) {
       throw notFound();
     }
   },
@@ -45,7 +46,8 @@ function SignedOutInvitationCard({ invitationId }: { invitationId: string }) {
     <AuthPageCard title="You&rsquo;re invited">
       <p className="text-sm text-muted-foreground">
         You&rsquo;ve been invited to join an organization on OpenSEO. Sign in
-        with the email address that received the invitation to accept it.
+        with the email address that received the invitation, or create an
+        account with it, to accept.
       </p>
       <div className="space-y-2">
         <Button
@@ -118,8 +120,9 @@ function InvitationCard({
         organizationId: accepted.data.invitation.organizationId,
       });
       captureClientEvent("team:invitation_accept");
-      // Full navigation: every cached query in this tab belongs to the old
-      // workspace.
+      // Full navigation: every cached query in this tab, and the remembered
+      // project, belong to the old workspace.
+      clearLastProjectId();
       window.location.assign("/");
     } catch {
       setActionError("We couldn't accept the invitation. Please try again.");

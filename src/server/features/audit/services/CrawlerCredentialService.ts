@@ -26,14 +26,30 @@ export interface SealedCrawlerAccess {
   expiresAt: string | null;
 }
 
-// Same key as the stored Google OAuth tokens, so self-hosters have one secret
-// to set and hosted mode always has it.
+// A key used only for these signatures. The audit worker that replays them
+// crawls untrusted sites, so it must not hold BETTER_AUTH_SECRET.
+async function readEncryptionKey(): Promise<string | null> {
+  const secret = (await getOptionalEnvValue("CRAWLER_ACCESS_SECRET"))?.trim();
+  return secret && secret.length >= MIN_BETTER_AUTH_SECRET_LENGTH
+    ? secret
+    : null;
+}
+
+/**
+ * Whether crawler access can be saved and replayed here: the optional
+ * CRAWLER_ACCESS_SECRET is set. The crawler-access form asks before it
+ * offers to save a signature.
+ */
+async function hasEncryptionKey(): Promise<boolean> {
+  return (await readEncryptionKey()) !== null;
+}
+
 async function getEncryptionKey(): Promise<string> {
-  const secret = (await getOptionalEnvValue("BETTER_AUTH_SECRET"))?.trim();
-  if (!secret || secret.length < MIN_BETTER_AUTH_SECRET_LENGTH) {
+  const secret = await readEncryptionKey();
+  if (!secret) {
     throw new AppError(
       "AUTH_CONFIG_MISSING",
-      `Set BETTER_AUTH_SECRET to at least ${MIN_BETTER_AUTH_SECRET_LENGTH} characters to store crawler access signatures. It encrypts them.`,
+      `Set CRAWLER_ACCESS_SECRET to at least ${MIN_BETTER_AUTH_SECRET_LENGTH} characters to store crawler access signatures. It encrypts them.`,
     );
   }
   return secret;
@@ -159,8 +175,10 @@ async function openCrawlerAccess(
   sealed: SealedCrawlerAccess | null | undefined,
 ): Promise<CrawlerAccess | null> {
   if (!sealed) return null;
+  // Outside the try: a worker deployed without the key is a config bug that
+  // must fail the audit loudly, not crawl unsigned as if nothing were saved.
+  const key = await getEncryptionKey();
   try {
-    const key = await getEncryptionKey();
     return {
       host: sealed.host,
       expiresAt: sealed.expiresAt,
@@ -170,7 +188,7 @@ async function openCrawlerAccess(
       ),
     };
   } catch {
-    // A rotated BETTER_AUTH_SECRET makes stored signatures unreadable. Crawl
+    // A rotated CRAWLER_ACCESS_SECRET makes stored signatures unreadable. Crawl
     // unsigned rather than fail the audit; the report asks for a new one.
     console.warn(`Could not decrypt crawler access for ${sealed.host}`);
     return null;
@@ -178,6 +196,7 @@ async function openCrawlerAccess(
 }
 
 export const CrawlerCredentialService = {
+  hasEncryptionKey,
   listCrawlerCredentials,
   saveCrawlerCredential,
   deleteCrawlerCredential,

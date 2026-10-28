@@ -18,6 +18,8 @@ import {
   startGoogleLink,
   useGoogleLinkPending,
 } from "@/client/features/integrations/startGoogleLink";
+import { hasNoGscWebsites } from "@/client/features/integrations/GscPropertySetupHelp";
+import { getErrorCode } from "@/client/lib/error-messages";
 import { captureClientEvent } from "@/client/lib/posthog";
 import { Button } from "@/client/components/ui/button";
 import { Spinner as SpinnerIcon } from "@/client/components/ui/spinner";
@@ -32,7 +34,7 @@ const GRANT_STATUS_KEY = ["gscGrantStatus"];
  */
 type NavigationProps = {
   onNext: () => void;
-  onBack: () => void;
+  onBack?: () => void;
   onSkip: () => void;
 };
 
@@ -44,11 +46,10 @@ export function SearchConsoleOnboardingStep(props: NavigationProps) {
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
-          Connect Google Search Console now?
+          Connect Google Search Console
         </h1>
-        <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-          Bring your real clicks and queries into OpenSEO and your AI agent. You
-          can also do this later from the dashboard.
+        <p className="mt-3 text-sm text-muted-foreground">
+          See which Google searches bring people to your site.
         </p>
       </div>
 
@@ -89,6 +90,11 @@ function GscConnect({
   const linking = useGoogleLinkPending();
   const [selection, setSelection] =
     React.useState<GooglePickerSelection | null>(null);
+  const continueRef = React.useRef<HTMLButtonElement>(null);
+
+  React.useEffect(() => {
+    if (selection) continueRef.current?.focus();
+  }, [selection]);
 
   const connectionOptions = googleConnectionOptions("gsc", projectId);
   const connectionKey = connectionOptions.queryKey;
@@ -116,11 +122,24 @@ function GscConnect({
     void queryClient.invalidateQueries({ queryKey: GRANT_STATUS_KEY });
   }, [requiresReconnect, queryClient, projectId]);
 
+  const noWebsites = hasNoGscWebsites(
+    accounts,
+    sitesQuery.isLoading,
+    sitesQuery.isError,
+  );
+  React.useEffect(() => {
+    if (noWebsites) captureClientEvent("onboarding:gsc_no_properties");
+  }, [noWebsites]);
+
   const setSiteMutation = useMutation({
     mutationFn: (selected: GooglePickerSelection) =>
       googleProviders.gsc.save(projectId, selected),
+    onError: (error) => {
+      captureClientEvent("onboarding:gsc_property_select_failed", {
+        error_code: getErrorCode(error) ?? "UNKNOWN",
+      });
+    },
     onSuccess: () => {
-      captureClientEvent("gsc:property_select");
       void queryClient.invalidateQueries({ queryKey: connectionKey });
       // The dashboard checklist reads the same connection state.
       void queryClient.invalidateQueries({
@@ -175,13 +194,19 @@ function GscConnect({
               onSave={() =>
                 selection && !busy && setSiteMutation.mutate(selection)
               }
-              saveLabel="Save and continue"
-              renderActions={(saveButton) => (
+              renderActions={(disabled) => (
                 <WizardFooter
                   onBack={onBack}
                   onSkip={onSkip}
                   skipLabel="Skip for now"
-                  continueAction={saveButton}
+                  continueLabel={
+                    setSiteMutation.isPending ? "Saving…" : "Save and continue"
+                  }
+                  continueDisabled={disabled}
+                  continueRef={continueRef}
+                  onContinue={() =>
+                    selection && !busy && setSiteMutation.mutate(selection)
+                  }
                 />
               )}
               saving={setSiteMutation.isPending}

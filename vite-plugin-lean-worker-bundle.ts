@@ -17,8 +17,15 @@ const WORKERS_AI_PROVIDER_STUB = fileURLToPath(
  * out. `generateBundle` below fails the build if one sneaks back in via a
  * static import chain.
  */
-const EAGER_DENYLIST: Array<{ pattern: RegExp; expected: string }> = [
+const EAGER_DENYLIST: Array<{
+  pattern: RegExp;
+  expected: string;
+  // Enforced by code splitting rather than by a stub/alias, so it cannot
+  // hold in the single-module standalone build (see vite.config.ts).
+  requiresCodeSplitting?: boolean;
+}> = [
   {
+    requiresCodeSplitting: true,
     pattern: /node_modules\/autumn-js\//,
     expected: "lazy-loaded behind the facade in src/server/billing/autumn.ts",
   },
@@ -45,11 +52,38 @@ const EAGER_DENYLIST: Array<{ pattern: RegExp; expected: string }> = [
       "localize zod errors)",
   },
   {
+    requiresCodeSplitting: true,
+    // Startup CPU, not memory: every tool's zod input/output schemas and the
+    // SDK's protocol schemas are built at module scope, which pushed the main
+    // worker toward the 400 ms startup CPU limit.
+    pattern:
+      /node_modules\/@modelcontextprotocol\/server\/|\/src\/server\/mcp\/(server|transport|tools\/)/,
+    expected:
+      "lazy-loaded behind the dynamic imports of src/server/mcp/transport.ts " +
+      "(server.ts, oauth-provider.ts, api-key-auth.ts) and samChatTools.ts " +
+      "(SamChatAgent.beforeTurn)",
+  },
+  {
+    requiresCodeSplitting: true,
     // Pre-existing boundary from the site-audit engine, guarded here too.
     pattern: /node_modules\/cheerio\//,
     expected:
       "lazy-loaded behind the page-analyzer dynamic import " +
       "(site-audit-workflow-helpers.ts)",
+  },
+];
+
+/**
+ * Dependencies that must stay out of the browser's entry chunk. The whole app
+ * renders inside <ClientOnly>, so every page waits for that chunk to load.
+ */
+const CLIENT_ENTRY_DENYLIST: Array<{ pattern: RegExp; expected: string }> = [
+  {
+    pattern: /node_modules\/recharts\//,
+    expected:
+      "imported only from route components, which are code-split. Route " +
+      "options like loader and validateSearch are not, so they must import " +
+      "from chart-free modules",
   },
 ];
 
@@ -66,10 +100,21 @@ const EAGER_DENYLIST: Array<{ pattern: RegExp; expected: string }> = [
  * 3. A `generateBundle` assertion that walks the static-import closure of the
  *    worker entry chunk and fails the build if any EAGER_DENYLIST module is
  *    reachable — turning "we verified the chunk by grepping a sourcemap once"
- *    into a permanent regression test.
+ *    into a permanent regression test. The client build gets the same check
+ *    against CLIENT_ENTRY_DENYLIST.
+ * 4. An ASCII-only guarantee for the worker chunks. V8 keeps each module's
+ *    source text alive for the life of the isolate, and one character outside
+ *    Latin-1 makes it store the whole file at two bytes per character (the
+ *    7.8 MB main chunk occupied 15.5 MB of the 128 MB heap). Rolldown escapes
+ *    code (`output.charset` in vite.config.ts) but keeps JSDoc comments
+ *    verbatim, so `generateBundle` escapes what is left in them.
  */
 export function leanWorkerBundle(): Plugin {
+  let standalone = false;
   return {
+    configResolved(config) {
+      standalone = config.mode === "standalone";
+    },
     name: "lean-worker-bundle",
     config() {
       return {
@@ -105,11 +150,20 @@ export function leanWorkerBundle(): Plugin {
       }
     },
     generateBundle(_options, bundle) {
-      // Only the worker builds matter for isolate memory; the client bundle
-      // never contains these packages (and the zod swap applies everywhere).
-      // "ssr" is the main worker; "open_seo_audit" is the site-audit aux
-      // worker, which must stay lean for the same reason it exists.
-      if (!["ssr", "open_seo_audit"].includes(this.environment.name)) {
+      // EAGER_DENYLIST only matters for the worker builds' isolate memory; the
+      // client bundle never contains these packages (and the zod swap applies
+      // everywhere). "ssr" is the main worker; "open_seo_audit" is the
+      // site-audit aux worker, which must stay lean for the same reason it
+      // exists.
+      const environment = this.environment.name;
+      let denylist: typeof EAGER_DENYLIST;
+      if (environment === "client") {
+        denylist = CLIENT_ENTRY_DENYLIST;
+      } else if (["ssr", "open_seo_audit"].includes(environment)) {
+        denylist = EAGER_DENYLIST.filter(
+          (rule) => !standalone || !rule.requiresCodeSplitting,
+        );
+      } else {
         return;
       }
 
@@ -118,6 +172,20 @@ export function leanWorkerBundle(): Plugin {
         const output = bundle[fileName];
         return output?.type === "chunk" ? output : undefined;
       };
+
+      if (environment !== "client") {
+        for (const output of Object.values(bundle)) {
+          if (output.type !== "chunk") continue;
+          // Code is already escaped by Rolldown; only comment text remains, and
+          // a \uXXXX sequence reads the same there (and stays valid in a
+          // string should one slip through). Per UTF-16 unit on purpose, so an
+          // astral character becomes its surrogate pair.
+          output.code = output.code.replace(
+            /[\u0080-\uffff]/g,
+            (unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, "0")}`,
+          );
+        }
+      }
 
       // Static-import closure from the entry chunks: everything here is
       // evaluated at isolate startup. Dynamic imports are excluded — landing
@@ -134,7 +202,7 @@ export function leanWorkerBundle(): Plugin {
       }
 
       const violations: string[] = [];
-      for (const rule of EAGER_DENYLIST) {
+      for (const rule of denylist) {
         for (const fileName of eager) {
           const hits =
             chunkAt(fileName)?.moduleIds.filter((id) =>
@@ -152,9 +220,9 @@ export function leanWorkerBundle(): Plugin {
 
       if (violations.length > 0) {
         this.error(
-          `[lean-worker-bundle] denylisted module(s) in the worker's eager ` +
-            `startup graph:\n\n${violations.join("\n\n")}\n\nRestore the ` +
-            `lazy/stub boundary, or update EAGER_DENYLIST in ` +
+          `[lean-worker-bundle] denylisted module(s) in the ${environment} ` +
+            `build's eager startup graph:\n\n${violations.join("\n\n")}\n\n` +
+            `Restore the lazy/stub boundary, or update the denylist in ` +
             `vite-plugin-lean-worker-bundle.ts if this is intentional.`,
         );
       }

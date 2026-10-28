@@ -16,6 +16,7 @@ import {
 } from "@/server/features/ai-visibility/services/aiVisibilityCollection";
 import { runAiResearchSetup } from "@/server/features/ai-visibility/services/aiResearchKeywords";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
+import { describeError } from "@/server/lib/errors";
 
 // One binding serves answer collection runs and the one-time research setup,
 // so setup needs no new workflow infrastructure.
@@ -31,6 +32,12 @@ const SINGLE_ATTEMPT = {
   retries: { limit: 0, delay: "1 second" as const },
   timeout: "2 minutes" as const,
 };
+// Steps that only read and write our own rows are free and safe to repeat, so
+// an engine failure on one attempt does not fail the run.
+const FREE_STEP = {
+  retries: { limit: 2, delay: "10 seconds" as const },
+  timeout: "2 minutes" as const,
+};
 // task_get is free and saving an answer replaces its evidence, so collect
 // steps can retry.
 const COLLECT_STEP = {
@@ -38,8 +45,9 @@ const COLLECT_STEP = {
   timeout: "5 minutes" as const,
 };
 // Live answers are billed per call, so a live step runs once too. It waits for
-// up to 6 answers, each up to 120 seconds.
-const LIVE_STEP = { ...SINGLE_ATTEMPT, timeout: "5 minutes" as const };
+// up to 6 answers, each up to 120 seconds, and asks a failed answer up to 3
+// times.
+const LIVE_STEP = { ...SINGLE_ATTEMPT, timeout: "10 minutes" as const };
 // Standard-queue answers usually arrive within minutes. Cumulative waits are
 // 2 / 4 / 7 / 10 / 14 / 18 / 22 / 26 / 30 minutes; anything still missing then
 // fails as not collected. Each sleep stays under 5 minutes, like rank check's:
@@ -77,38 +85,93 @@ export class AiVisibilityWorkflow extends WorkflowEntrypoint<
       );
     const { runId, customer } = payload;
     const markFailed = async (error: unknown) => {
-      await pgStep(step, "mark-failed", SINGLE_ATTEMPT, () =>
-        markAiRunFailed(runId, error),
+      await pgStep(step, "mark-failed", FREE_STEP, () =>
+        markAiRunFailed(runId),
       );
       throw error;
     };
     const failRun = (error: unknown) => {
-      console.error(`[ai-visibility] ${runId} failed:`, error);
+      console.error(
+        `[ai-visibility] ${runId} failed: ${describeError(error)}`,
+        error,
+      );
       return markFailed(error);
     };
     let pending: AiPendingTask[] = [];
     let plan: Awaited<ReturnType<typeof prepareAiRun>>;
+    // Reads the pending answers once, then posts each answer that DataForSEO's
+    // backend failed again in its own step, since a post is billed. The read
+    // steps are `read-*`, not the older `collect-*`: a run in flight across a
+    // deploy must not replay a `collect-*` output, which had another shape.
+    const collect = async (name: string, canRetry: boolean) => {
+      const remaining = pending;
+      let round: Awaited<ReturnType<typeof collectAiRound>>;
+      try {
+        round = await pgStep(step, `read-${name}`, COLLECT_STEP, () =>
+          collectAiRound(runId, remaining, canRetry),
+        );
+      } catch (error) {
+        // Posted tasks are already paid for; keep polling them next round.
+        console.warn(
+          `[ai-visibility] ${runId} read-${name}: ${describeError(error)}`,
+        );
+        return;
+      }
+      pending = round.pending;
+      for (const [index, batch] of round.retry.entries()) {
+        try {
+          pending.push(
+            ...(await pgStep(
+              step,
+              `repost-${name}-${index}`,
+              SINGLE_ATTEMPT,
+              () => postAiBatch(runId, customer, plan.market, batch),
+            )),
+          );
+        } catch (error) {
+          // Its answers fail at finalize.
+          console.warn(
+            `[ai-visibility] ${runId} repost-${name}: ${describeError(error)}`,
+          );
+        }
+      }
+    };
     try {
-      plan = await pgStep(step, "prepare", SINGLE_ATTEMPT, () =>
-        prepareAiRun(runId, customer),
+      plan = await pgStep(step, "prepare", FREE_STEP, () =>
+        prepareAiRun(runId),
       );
+    } catch (error) {
+      return failRun(error);
+    }
+    // A batch whose step fails, on the engine's own error or a timeout, leaves
+    // its answers pending for finalize to fail. The other batches still run,
+    // so the run keeps every answer it got.
+    if (plan.live)
       // Live runs save each live batch as it returns, so nothing is left
       // pending to poll.
-      if (plan.live)
-        for (const [index, tasks] of plan.batches.entries())
+      for (const [index, tasks] of plan.batches.entries())
+        try {
           await pgStep(step, `live-${index}`, LIVE_STEP, () =>
             collectAiLiveBatch(runId, customer, plan.market, tasks),
           );
-      else
-        for (const [index, batch] of plan.batches.entries())
+        } catch (error) {
+          console.warn(
+            `[ai-visibility] ${runId} live-${index}: ${describeError(error)}`,
+          );
+        }
+    else
+      for (const [index, batch] of plan.batches.entries())
+        try {
           pending.push(
             ...(await pgStep(step, `post-${index}`, SINGLE_ATTEMPT, () =>
               postAiBatch(runId, customer, plan.market, batch),
             )),
           );
-    } catch (error) {
-      return failRun(error);
-    }
+        } catch (error) {
+          console.warn(
+            `[ai-visibility] ${runId} post-${index}: ${describeError(error)}`,
+          );
+        }
     // Claude and Perplexity answers come from the model API on every run.
     // Queued answers process meanwhile, and each model batch is followed by
     // one free read of them.
@@ -119,20 +182,11 @@ export class AiVisibilityWorkflow extends WorkflowEntrypoint<
         );
       } catch (error) {
         // Its unsaved answers fail at finalize; the other batches continue.
-        console.warn(`[ai-visibility] ${runId} model-${index}:`, error);
-      }
-      if (!pending.length) continue;
-      const remaining = pending;
-      try {
-        pending = await pgStep(
-          step,
-          `collect-model-${index}`,
-          COLLECT_STEP,
-          () => collectAiRound(runId, remaining),
+        console.warn(
+          `[ai-visibility] ${runId} model-${index}: ${describeError(error)}`,
         );
-      } catch (error) {
-        console.warn(`[ai-visibility] ${runId} collect-model-${index}:`, error);
       }
+      if (pending.length) await collect(`model-${index}`, true);
     }
     for (
       let round = 0;
@@ -148,20 +202,11 @@ export class AiVisibilityWorkflow extends WorkflowEntrypoint<
         // log it as one.
         return markFailed(error);
       }
-      const remaining = pending;
-      try {
-        pending = await pgStep(step, `collect-${round}`, COLLECT_STEP, () =>
-          collectAiRound(runId, remaining),
-        );
-      } catch (error) {
-        // Posted tasks are already paid for; keep polling them next round.
-        console.warn(`[ai-visibility] ${runId} collect-${round}:`, error);
-      }
+      // A task posted after the last round would never be read.
+      await collect(`${round}`, round < POLL_INTERVALS.length - 1);
     }
     try {
-      await pgStep(step, "finalize", SINGLE_ATTEMPT, () =>
-        finalizeAiRun(runId),
-      );
+      await pgStep(step, "finalize", FREE_STEP, () => finalizeAiRun(runId));
     } catch (error) {
       return failRun(error);
     }

@@ -4,19 +4,24 @@ import {
   type ConfigurationRows,
   type RunRow,
 } from "../repositories/AiVisibilityRepository";
-import { AiVisibilityError } from "./aiVisibilityErrors";
+import { AI_ANSWER_FAILURES, AiVisibilityError } from "./aiVisibilityErrors";
 import { aiScope } from "./aiVisibilityConfiguration";
+import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
 import {
-  getOptionalEnvValue,
-  isHostedServerAuthMode,
-} from "@/server/lib/runtime-env";
-import type { BillingCustomerContext } from "@/server/billing/subscription";
+  getOrCreateOrganizationCustomer,
+  getUsageCreditsRemaining,
+  type BillingCustomerContext,
+} from "@/server/billing/subscription";
+import { AppError } from "@/server/lib/errors";
+import { sendCreditsExhaustedEvent } from "@/server/email/onboarding-drip";
 import type { AiRun } from "@/shared/ai-visibility";
 import type { RunAiCheckInput } from "@/types/schemas/ai-visibility";
 import { requireConfiguration } from "./aiVisibilityMutation";
 import { aiPromptIsBranded } from "./aiVisibilityMatching";
 import { aiRunView } from "./aiVisibilityResults";
 import { aiCostForAnswers } from "./aiVisibilityCost";
+import { hasDataforseoAccess } from "@/server/lib/provider-access";
+import { startWorkflow } from "@/server/lib/startWorkflow";
 
 const ACTIVE_WORKFLOW_STATUSES = new Set([
   "queued",
@@ -38,9 +43,9 @@ async function staleRunReason(run: RunRow): Promise<string | null> {
     .catch(() => null);
   if (status && ACTIVE_WORKFLOW_STATUSES.has(status.status)) return null;
   if (Date.now() - Date.parse(run.createdAt) < STARTUP_GRACE_MS) return null;
-  return status
-    ? `Collection stopped (${status.status}).`
-    : "Collection stopped before it started.";
+  if (!status) return AI_ANSWER_FAILURES.stoppedBeforeStart;
+  console.warn(`[ai-visibility] ${run.id} workflow stopped (${status.status})`);
+  return AI_ANSWER_FAILURES.stopped;
 }
 
 /** Fails a run and its unfinished answers. Safe on a finished run. */
@@ -68,7 +73,7 @@ export async function startRun(
   billing: BillingCustomerContext,
   promptIds?: string[],
 ): Promise<AiRun> {
-  if (!(await getOptionalEnvValue("DATAFORSEO_API_KEY")))
+  if (!(await hasDataforseoAccess()))
     throw new AiVisibilityError(
       "PROVIDER_NOT_CONFIGURED",
       "An operator must configure DATAFORSEO_API_KEY before collection. Your saved tracker remains available.",
@@ -89,6 +94,33 @@ export async function startRun(
       "NO_ACTIVE_PROMPTS",
       "Add or unpause prompts before starting a check.",
     );
+  // Hosted checks need credits for every answer before they start, like rank
+  // checks. The tracker says why no check ran, whichever path started it.
+  if (await isHostedServerAuthMode()) {
+    const required = aiCostForAnswers(
+      scope.prompts.flatMap(() => scope.engines),
+      true,
+      trigger === "scheduled" ? "queued" : "live",
+    ).costCredits;
+    // getOrCreate: an org's first check can come before its Autumn customer.
+    const { id } = await getOrCreateOrganizationCustomer(billing);
+    const credits = await getUsageCreditsRemaining(id);
+    // Clamp at 0: research setup can overdraw monthly credits, and top-up
+    // credits still pay for the check.
+    const available =
+      Math.max(credits.monthlyRemaining, 0) +
+      Math.max(credits.topupRemaining, 0);
+    if (available < required) {
+      await repo.updateTracker(config.tracker.id, {
+        lastSkipReason: "INSUFFICIENT_CREDITS",
+      });
+      await sendCreditsExhaustedEvent(billing);
+      throw new AppError(
+        "INSUFFICIENT_CREDITS",
+        "Not enough credits for this AI visibility check.",
+      );
+    }
+  }
   const own = { name: project.name, domain: project.domain };
   // Two attempts: once normally, once after failing a stale blocker.
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -129,21 +161,25 @@ export async function startRun(
       );
     }
     try {
-      await env.AI_VISIBILITY_WORKFLOW.create({
-        id,
-        // Only the billing fields: the request context is not serializable.
-        params: {
-          runId: id,
-          customer: {
-            organizationId: billing.organizationId,
-            userId: billing.userId,
-            userEmail: billing.userEmail,
-            projectId: project.id,
+      await startWorkflow(
+        env.AI_VISIBILITY_WORKFLOW,
+        {
+          id,
+          // Only the billing fields: the request context is not serializable.
+          params: {
+            runId: id,
+            customer: {
+              organizationId: billing.organizationId,
+              userId: billing.userId,
+              userEmail: billing.userEmail,
+              projectId: project.id,
+            },
           },
         },
-      });
+        "AI visibility check",
+      );
     } catch (error) {
-      await failAiRun(id, "Collection could not start.");
+      await failAiRun(id, AI_ANSWER_FAILURES.notStarted);
       throw error;
     }
     return getRun({ projectId: project.id, runId: id });

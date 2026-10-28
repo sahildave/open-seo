@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getOptionalEnvValue } from "@/server/lib/runtime-env";
 
 const { upsertMock, listMock } = vi.hoisted(() => ({
   upsertMock: vi.fn(),
@@ -120,5 +121,41 @@ describe("saveCrawlerCredential", () => {
     );
 
     expect(result).toMatchObject({ credential: { host: "store.example.com" } });
+  });
+});
+
+describe("hasEncryptionKey", () => {
+  // What the client reads as canStoreCrawlerAccess before it offers the form.
+  it("is true with a CRAWLER_ACCESS_SECRET of 32 or more characters", async () => {
+    await expect(CrawlerCredentialService.hasEncryptionKey()).resolves.toBe(
+      true,
+    );
+  });
+
+  it.each([
+    ["unset", undefined],
+    ["shorter than 32 characters", "too-short-to-encrypt-with"],
+    ["32 characters only with its whitespace", `${"x".repeat(31)} `],
+  ])("is false when the secret is %s", async (_case, value) => {
+    vi.mocked(getOptionalEnvValue).mockResolvedValueOnce(value);
+
+    await expect(CrawlerCredentialService.hasEncryptionKey()).resolves.toBe(
+      false,
+    );
+  });
+});
+
+describe("openCrawlerAccess", () => {
+  it("fails instead of crawling unsigned when the worker has no key", async () => {
+    vi.mocked(getOptionalEnvValue).mockResolvedValueOnce(undefined);
+
+    await expect(
+      CrawlerCredentialService.openCrawlerAccess({
+        host: "store.example.com",
+        signatureInput: "sealed",
+        signature: "sealed",
+        expiresAt: null,
+      }),
+    ).rejects.toMatchObject({ code: "AUTH_CONFIG_MISSING" });
   });
 });

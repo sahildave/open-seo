@@ -1,6 +1,6 @@
 ---
 title: "Set up OpenSEO MCP"
-description: "Connect OpenSEO MCP to Claude, Codex, and other AI clients."
+description: "Connect OpenSEO MCP to ChatGPT, Claude, Codex, and other AI clients."
 ---
 
 OpenSEO MCP lets compatible AI clients call OpenSEO tools for keyword research, SERP inspection, local business research, competitive search intelligence, domain research, backlink overview, saved keywords, rank tracking, shared project context, and Google Search Console performance and URL inspection.
@@ -19,6 +19,10 @@ For setup prompts, plugin commands, and skill updates, see [Agent setup](/docs/a
 
 No account yet? Try the [free SEO tools](/tools).
 
+## ChatGPT web and desktop
+
+Install the [OpenSEO plugin for ChatGPT](https://chatgpt.com/plugins/plugin_asdk_app_6abddd2c7e4c819191f1398c4bd8e9b3). It adds MCP and the SEO skills together. If the plugin isn't available for your account, or you self-host OpenSEO, add a [custom connection](/docs/chatgpt#custom-connection) instead. The [ChatGPT setup guide](/docs/chatgpt) covers both.
+
 ## Claude Code
 
 The [OpenSEO plugin](/docs/claude-code-plugin) is the preferred way to connect Claude Code — one install adds MCP and the public SEO skills together. Use the steps below only if you want MCP on its own.
@@ -32,6 +36,8 @@ claude mcp add --transport http --scope user openseo https://app.openseo.so/mcp
 After adding the server, approve the OpenSEO login when prompted.
 
 ## Claude Desktop
+
+On a paid Claude plan, prefer the [OpenSEO plugin](/docs/claude-code-plugin#install-in-claude-cowork), which adds MCP and the SEO skills in one install. Use the custom connector below for MCP only or on the Free plan.
 
 1. Open Customize -> Connectors.
 2. Click Add (or +), then choose Add custom connector.
@@ -70,16 +76,21 @@ codex mcp add openseo --url https://app.openseo.so/mcp
 
 Approve the login when prompted.
 
-## Codex Desktop
+## Codex in the ChatGPT desktop app
 
-1. Open Settings -> Integrations & MCP.
-2. Click Add your own.
-3. Paste `https://app.openseo.so/mcp`.
-4. Approve the OpenSEO login when prompted.
+The [OpenSEO plugin](/docs/codex-plugin#desktop-app) includes MCP and SEO skills. For MCP alone:
+
+1. Open **Codex**, then **Settings → MCP servers → Add server**.
+2. Name it `openseo`, choose **Streamable HTTP**, and enter `https://app.openseo.so/mcp`.
+3. Save and select **Restart** when prompted.
+4. Select **Authenticate** for OpenSEO and approve sign-in when prompted. Skip this step for a local server configured without authentication.
+5. Start a new Codex chat and ask: “Use OpenSEO to check my connection and list my projects.”
+
+This local connection is separate from ChatGPT web. See [OpenAI's MCP documentation](https://learn.chatgpt.com/docs/extend/mcp).
 
 ## Connect with an API key
 
-Use an API key in headless environments, CI, or clients where OAuth is inconvenient. API keys are personal: anything an agent does with your key acts as you in your workspace.
+Use an API key in headless environments, CI, or clients where OAuth is inconvenient. API keys are personal: anything an agent does with your key acts as you in the workspace that was active when you created it.
 
 In the [OpenSEO app](https://app.openseo.so/settings), open **Settings -> API keys**, create a key, and copy it when it appears. It won't be shown again.
 
@@ -113,6 +124,10 @@ codex mcp add openseo --url https://app.openseo.so/mcp --bearer-token-env-var OP
 
 Any other client that supports custom HTTP headers can send `Authorization: Bearer oseo_YOUR_KEY` or `x-api-key: oseo_YOUR_KEY`.
 
+## Workspaces and revoking access
+
+An OAuth connection or API key is tied to the workspace that was active when you authorized or created it. To use OpenSEO in another workspace, connect again and pick that workspace on the authorization page, or switch to it in the app before creating a key. To disconnect an agent, open [Settings](https://app.openseo.so/settings) and choose **Disconnect** under **Connected agents**. To revoke a key, choose **Revoke key** under **API keys**. A disconnected agent has to sign in again before it can call OpenSEO.
+
 ## Available tools
 
 OpenSEO MCP exposes tools for SEO research workflows:
@@ -138,8 +153,10 @@ OpenSEO MCP exposes tools for SEO research workflows:
 - Research questions about a keyword with ChatGPT's answers and cited sources (uses credits).
 - Configure AI prompt tracking, preview cost, and start or pause scheduled checks.
 - Read and export saved AI answers, trends, citations, and competitor appearances without using credits.
+- List the Search Console sites and Google Analytics properties your connected Google accounts can see, and bind one to a project (free, no credits). Connecting a Google account itself still happens in Settings > Integrations.
 - Read first-party Google Search Console performance (clicks, impressions, CTR, position).
 - Inspect index status, crawl, and canonical for specific URLs (up to 10 per call).
+- Tell Bing and other IndexNow search engines which pages on your site were added, changed, or removed (free, no credits). Your site hosts the project's key file, shown in Settings > Integrations. Google doesn't use IndexNow.
 - Read and update a project's shared context: business, goal, positioning, writing preferences, competitors, key pages, and a research log (free, no credits).
 - Save and read HTML reports on a project (free, no credits). New reports are private. On hosted OpenSEO, explicitly ask the agent to publish with `set_report_sharing` (`public: true`) or revoke the link (`public: false`). `get_report` returns `report.shareUrl` for an existing public link, or `null` when unavailable.
 - List a project's report templates, and save a reusable report brief to the project (free, no credits).
