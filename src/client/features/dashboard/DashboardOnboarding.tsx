@@ -46,8 +46,12 @@ export function DashboardOnboarding({
       captureClientEvent("dashboard:setup_step_defer", { step, dismissed });
     },
   });
+  // Competitor and keyword steps lead to screens hidden from navigation.
   const steps = setupSteps.filter(
-    (step) => step.id !== "team" || usesBetterAuthClient(),
+    (step) =>
+      step.id !== "competitor" &&
+      step.id !== "keywords" &&
+      (step.id !== "team" || usesBetterAuthClient()),
   );
   const remaining = steps.filter(
     (step) => getStepStatus(activation, step.id) === "todo",
@@ -69,8 +73,7 @@ export function DashboardOnboarding({
       <header className="border-b border-border px-5 py-5 sm:px-6">
         <h2 className="text-lg font-semibold">Get started</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Research competitors and keywords, audit your site, and connect your
-          tools.
+          Audit your site and connect your tools.
         </p>
       </header>
       <Accordion

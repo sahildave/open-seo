@@ -1,15 +1,9 @@
 import {
-  Bookmark,
   Bot,
   Brain,
-  ChartLine,
   ClipboardCheck,
   FileText,
-  Globe,
   LayoutDashboard,
-  Link2,
-  MessageSquare,
-  Search,
   TrendingUp,
 } from "lucide-react";
 import { linkOptions } from "@tanstack/react-router";
@@ -25,16 +19,6 @@ const projectNavItems = [
     activeOptions: { exact: true, includeSearch: false },
   },
   {
-    to: "/p/$projectId/keywords" as const,
-    label: "Keyword Research",
-    icon: Search,
-  },
-  {
-    to: "/p/$projectId/saved" as const,
-    label: "Saved Keywords",
-    icon: Bookmark,
-  },
-  {
     to: "/p/$projectId/rank-tracking" as const,
     label: "Rank Tracking",
     icon: TrendingUp,
@@ -45,35 +29,9 @@ const projectNavItems = [
     icon: GoogleGlyphMuted,
   },
   {
-    to: "/p/$projectId/domain" as const,
-    label: "Domain Overview",
-    icon: Globe,
-  },
-  {
-    to: "/p/$projectId/backlinks" as const,
-    label: "Backlinks",
-    icon: Link2,
-  },
-  {
     to: "/p/$projectId/audit" as const,
     label: "Site Audit",
     icon: ClipboardCheck,
-  },
-  {
-    to: "/p/$projectId/ai-visibility" as const,
-    label: "Prompt Tracking",
-    icon: ChartLine,
-    activeOptions: { exact: true, includeSearch: false },
-  },
-  {
-    to: "/p/$projectId/ai-visibility/research" as const,
-    label: "Prompt Research",
-    icon: Search,
-  },
-  {
-    to: "/p/$projectId/prompt-explorer" as const,
-    label: "Prompt Explorer",
-    icon: MessageSquare,
   },
   {
     to: "/p/$projectId/reports" as const,
@@ -112,8 +70,9 @@ function getProjectNavItems(projectId: string) {
   );
 }
 
-// Grouped by scope: "My Site" is the project's own domain (tracked data),
-// "Research" is point-at-anything lookup tools.
+// Grouped by scope: "My Site" is the project's own domain (tracked data).
+// Research and AI Visibility screens are hidden: this self-hosted install has
+// no DataForSEO or OpenRouter key. Their routes stay reachable by URL.
 export function getProjectNavGroups(projectId: string) {
   const all = getProjectNavItems(projectId);
   const byPath = (path: (typeof projectNavItems)[number]["to"]) =>
@@ -125,27 +84,10 @@ export function getProjectNavGroups(projectId: string) {
       items: [byPath("/p/$projectId")],
     },
     {
-      label: "Research",
-      items: [
-        byPath("/p/$projectId/keywords"),
-        byPath("/p/$projectId/domain"),
-        byPath("/p/$projectId/backlinks"),
-      ],
-    },
-    {
-      label: "AI Visibility",
-      items: [
-        byPath("/p/$projectId/ai-visibility/research"),
-        byPath("/p/$projectId/prompt-explorer"),
-        byPath("/p/$projectId/ai-visibility"),
-      ],
-    },
-    {
       label: "My Site",
       items: [
         byPath("/p/$projectId/search-performance"),
         byPath("/p/$projectId/rank-tracking"),
-        byPath("/p/$projectId/saved"),
         byPath("/p/$projectId/audit"),
       ],
     },

@@ -1,6 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Link2, Settings } from "lucide-react";
-import { EmptyState } from "@/client/components/EmptyState";
+import { Settings } from "lucide-react";
 import { Button } from "@/client/components/ui/button";
 import {
   Tabs,
@@ -9,9 +8,7 @@ import {
   TabsContent,
 } from "@/client/components/ui/tabs";
 import { DashboardKeywords } from "./DashboardKeywords";
-import { DashboardBacklinks } from "./DashboardBacklinks";
 import { DashboardNewQueries } from "./DashboardNewQueries";
-import { DashboardLinkActivity } from "./DashboardLinkActivity";
 import { dashboardSiteTabSchema } from "@/types/schemas/dashboard";
 import type { z } from "zod";
 import { Fragment } from "react";
@@ -90,7 +87,6 @@ export function DashboardPage({
     );
   }
 
-  const showBacklinks = activation.domain !== null;
   const gscConnected = activation.gsc.connected;
   const ga4Connected = activation.ga4.connected;
 
@@ -138,20 +134,6 @@ export function DashboardPage({
                 projectId={projectId}
                 audit={overview.audit}
                 domain={activation.domain}
-              />
-            ),
-          },
-        ]
-      : []),
-    ...(showBacklinks
-      ? [
-          {
-            key: "backlinks",
-            hasData: true,
-            node: (
-              <DashboardLinkActivity
-                projectId={projectId}
-                domain={activation.domain!}
               />
             ),
           },
@@ -228,7 +210,6 @@ export function DashboardPage({
               [
                 ["overview", "Overview"],
                 ["keywords", "Keywords"],
-                ["backlinks", "Backlinks"],
               ] as const
             ).map(([value, label]) => (
               <TabsTrigger key={value} value={value} className="px-3">
@@ -257,35 +238,6 @@ export function DashboardPage({
               connected={gscConnected}
               siteUrl={activation.gsc.siteUrl}
             />
-          </TabsContent>
-          <TabsContent value="backlinks" keepMounted={false}>
-            {activation.domain ? (
-              <DashboardBacklinks
-                key={activation.domain}
-                projectId={projectId}
-                domain={activation.domain}
-              />
-            ) : (
-              <EmptyState
-                variant="card"
-                icon={Link2}
-                title="See who links to your website"
-                description="Add your website to track new and lost backlinks and the sites sending them."
-                action={
-                  <Button
-                    nativeButton={false}
-                    render={
-                      <Link
-                        to="/p/$projectId/settings"
-                        params={{ projectId }}
-                      />
-                    }
-                  >
-                    Add your website
-                  </Button>
-                }
-              />
-            )}
           </TabsContent>
         </Tabs>
       </div>

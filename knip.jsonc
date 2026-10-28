@@ -31,6 +31,10 @@
     "scripts/**",
     // shadcn components are copied in whole; pages use only some exports
     "src/client/components/ui/**",
+    // Fork: backlinks dashboard views are hidden (no DataForSEO key) but kept
+    // so upstream merges stay clean.
+    "src/client/features/dashboard/DashboardBacklinks.tsx",
+    "src/client/features/dashboard/DashboardLinkActivity.tsx",
   ],
   // tests/badseo/ is the standalone broken-SEO fixture worker (own deps/config),
   // like web/ it isn't part of the app's module graph.
